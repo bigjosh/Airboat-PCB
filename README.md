@@ -1,13 +1,20 @@
-Vibe V2
+Airboat
 =======
 
-Firmware and board files for Dame Products EVA Vibe V2. More product info here...
+Firmware and board files for Dame Products Airboat. More product info here...
 
 http://www.dameproducts.com/
 
-Note that this V2 of the board. The older V1 board files are here...
+Note that this is a fork of the oringal EVA V2 design which is available here...
 
-https://github.com/bigjosh/VibeSystem
+https://github.com/bigjosh/vibe-v2
+
+Changes include....
+
+1. Much smaller form factor.
+2. MCU switched to smaller ATTINY10 device.
+3. Battery charge controller switched to smaller MCP73831 device.
+
 
 User Interface
 --------------
