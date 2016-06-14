@@ -117,10 +117,10 @@ typedef struct {
 
 const speedStepStruct speedSteps[SPEED_STEP_COUNT] PROGMEM = {
 	
-	{           0,    0 },			// step 0 = off
-	{		3136,  7510 },
-	{	    8992,  8193 },
-	{	   25400, 15660 },
+	{          0,    0 },			// step 0 = off
+	{		  12,  255 },
+	{	      35,  255 },
+	{	      99,  255 },
 		
 };
 
@@ -146,6 +146,8 @@ void motorOff(void) {
 
 void motorInit() {
 	
+	DDRB |= _BV(4);		// Set pin to output mode. It will already be low because ports default to 0 on reset
+
 	DDRB |= _BV(3);		// Set pin to output mode. It will already be low because ports default to 0 on reset
 		
 }
@@ -158,7 +160,7 @@ void motorInit() {
 // top sets the frequency where PWM frequency = F_CPU/top. The minimum resolution allowed is 2-bit (top set to 0x0003).
 
 
-void setMotorPWM( uint16_t match , uint16_t top ) {
+void setMotorPWM( uint8_t match , uint8_t top ) {
 			
 	if (match==0) {			// Special case this because the PWM generator still generates a pulse at 0 duty cycle
 							// "If the OCR1x is set equal to BOTTOM (0x0000) the output will be a narrow spike for each TOP+1 timer clock cycle."
@@ -167,18 +169,24 @@ void setMotorPWM( uint16_t match , uint16_t top ) {
 		
 	} else {
 		
-		//            0001	CS1[3:0]		0001=CK/1 in Sychonus mode  		
+		//            0001	CS1[3:0]		0001=CK/1 in Sychonus mode  		(4kHz with built in 1mhz clock)
 		TCCR1 = 0b00000001;
 		
-		//        1			PWM1B			1 = Enable PWM B
-		//         11       COM1B			11 = Set the OC1B output line on compare match
-		GTCCR = 0b11100000;
+		//         1		PWM1B			1 = Enable PWM B
+		//          11       COM1B			11 = Set the OC1B output line on compare match
+		//          10       COM1B			11 = Set the OC1B output line on compare match
+		GTCCR = 0b011100000;
+//		GTCCR = 0b010100000;
 		
 		
-		OCR1A = 64;		// TODO: THis should give us hard coded 75% duty cycle
+		OCR1B = match;		// TODO: THis should give us hard coded 75% duty cycle
 		
 		
-		OCR1C = 255;	// COunter top value - resets to zero when we get here
+		OCR1C = top;	// COunter top value - resets to zero when we get here
+		
+		// Silicon bug:
+		// http://electronics.stackexchange.com/questions/97596/attiny85-pwm-why-does-com1a0-need-to-be-set-before-pwm-b-will-work
+		TCCR1 |= (1 << COM1A0);		
 												
 	}
 	
@@ -409,10 +417,48 @@ EMPTY_INTERRUPT( PCINT0_vect );
 	
 int main(void)
 {
-	
+
+/*
+// Enable PLL and async PCK for high-speed PWM
+//PLLCSR |= (1 << PLLE) | (1 << PCKE);
+
+// Set prescaler to PCK/2048
+//TCCR1 |= (1 << CS10) | (1 << CS11) | (0 << CS12) | (0 << CS13);
+TCCR1 |= (1 << CS10); //CK/1
+
+// Set OCR1B compare value and OCR1C TOP value
+OCR1B = 228;
+OCR1C = 255;
+
+// Enable OCRB output on PB4, configure compare mode and enable PWM B
+DDRB |= (1 << PB4);
+GTCCR |= (1 << COM1B0) | (1 << COM1B1);
+GTCCR |= (1 << PWM1B);
+
+// Why is this necessary?
+TCCR1 |= (1 << COM1A0);
+
+*/ 
+
+
 	motorInit();				// Initialize the motor port to drive the MOSFET low
+
+
+	while (1) {
+		for (uint8_t i=0; i<255;i++)	 {
+			setMotorPWM(i,255);
+			_delay_ms(10);
+		}
+	}
 	
-	setMotorPWM(0,0);
+	while (1) {
+		PORTB |= _BV( 0);
+		_delay_ms(100);
+		PORTB &= ~_BV(0);
+		_delay_ms(100);
+	}
+	
+	
 	while (1);
 	
 	uint8_t watchDogResetFlag = MCUSR & _BV(WDRF);		/// Save the watchdog flag
