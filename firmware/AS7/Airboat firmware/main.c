@@ -1,9 +1,9 @@
-@@ -1,808 +0,0 @@
 /*
- * Vibe_V2_firmware.c
+ * main.c
  *
- * Created: 11/30/2014 12:25:41 PM
+ * Created: 6/13/2016 12:25:41 PM
  *  Author: josh.com
+ *  Based on Vibe V2 firmware
  */ 
 
 
@@ -36,53 +36,35 @@
 
 #define WHITE_LED_PORT PORTB
 #define WHITE_LED_DDR DDRB
-#define WHITE_LED_BIT 2
+#define WHITE_LED_BIT 0
 
-#define RED_LED_PORT PORTA
-#define RED_LED_DDR DDRA
-#define RED_LED_BIT 7
+#define RED_LED_PORT PORTB
+#define RED_LED_DDR DDRB
+#define RED_LED_BIT 1
 
 
 // Inputs
 
-#define BATTERY_SENSE_PORT PORTA
-#define BATTERY_SENSE_DDR DDRA
-#define BATTERY_SENSE_BIT 3
-#define BATTERY_INT 
-
-
 #define BUTTON_PORT PORTB
 #define BUTTON_PIN	PINB
 #define BUTTON_DDR  DDRB
-#define BUTTON_BIT	0
-#define BUTTON_INT	PCINT8
+#define BUTTON_BIT	4
+#define BUTTON_INT	PCINT4
 
 // Is button currently pressed? Pin has a pullup connected to ground though button, so a down reads a 0 on the pin. 
 // (Compiles down to a single SBIC instruction)
 #define BUTTON_STATE_DOWN()	((BUTTON_PIN & _BV(BUTTON_BIT))==0)
 
-// EOC is the end-of-charge (battery full) signal. It s Active LOW.
-// It is connected to the STAT2 line from the battery controller
+
+// CIP is the charge-in-progress signal. It s active LOW when battery is charging.
+// High when battery is full or when no charger is attached. 
+// It is connected to the STAT line from the battery controller
 // Note we must be pull up this line
-#define EOC_PORT PORTA
-#define EOC_DDR	 DDRA
-#define EOC_PIN PINA
-#define EOC_BIT 0
-#define EOC_INT PCINT0
-
-// EOC pin is pulled LOW by battery charger to indicate End of Charge
-// (Compiles down to a single SBIC instruction)
-
-#define EOC_STATE_ACTIVE()		((EOC_PIN & _BV(EOC_BIT))==0)
-
-// CIP is the charge-in-progress (battery full) signal. It s Active LOW.
-// It is connected to the STAT1 line from the battery controller
-// Note we must be pull up this line
-#define CIP_PORT PORTA
-#define CIP_PIN  PINA
-#define CIP_DDR	 DDRA
-#define CIP_BIT 1
-#define CIP_INT PCINT1
+#define CIP_PORT PORTB
+#define CIP_PIN  PINB
+#define CIP_DDR	 DDRB
+#define CIP_BIT 2
+#define CIP_INT PCINT2
 
 // CIP is pulled LOW by battery charger to indicate Charge In Progress
 // (Compiles down to a single SBIC instruction)
@@ -147,13 +129,14 @@ const speedStepStruct speedSteps[SPEED_STEP_COUNT] PROGMEM = {
 // Note that register values are hard coded rather than #defined because they 
 // can not just be moved around.
 
+// Motor is connected to pin OC1B
 									
 // Turn the motor completely off- disconnects from PWM generator
 
 void motorOff(void) {
 
 		
-	TCCR1A = 0;		// Disconnect Timer1A outputs from pins. "Normal port operation, OC1B disconnected"	
+	GTCCR = 0;		// "Timer/Counter Comparator B disconnected from output pin OC1B"	
 					// Will revert back to PORT value, which is always zero
 		
 }
@@ -163,7 +146,7 @@ void motorOff(void) {
 
 void motorInit() {
 	
-	DDRA |= _BV(5);		// Set pin to output mode. It will already be low because ports default to 0 on reset
+	DDRB |= _BV(3);		// Set pin to output mode. It will already be low because ports default to 0 on reset
 		
 }
 
@@ -184,33 +167,18 @@ void setMotorPWM( uint16_t match , uint16_t top ) {
 		
 	} else {
 		
+		//            0001	CS1[3:0]		0001=CK/1 in Sychonus mode  		
+		TCCR1 = 0b00000001;
 		
-		// Set OC1B on Compare Match
-		// Clear OC1B at BOTTOM (inverting mode)
-	
-		// Fast PWM, TOP= OCR1A, Update OCR1x at top
-	
-		// Clock select clk	I/O/1 (No prescaling)
-		
-		
-		// Assign TOP first to make sure we don't miss the match
-		
-		OCR1A = top;							// Set TOP. Freq should be IOclk/OCR1A = 16Khz		
-		OCR1B = match;		// Set match which sets duty cycle
+		//        1			PWM1B			1 = Enable PWM B
+		//         11       COM1B			11 = Set the OC1B output line on compare match
+		GTCCR = 0b11100000;
 		
 		
-		//			0bxx100000	COM1B		PWM Fast mode, Clear OC1A/OC1B on Compare Match, set OC1A/OC1B at BOTTOM (non-inverting mode)
-		//			0bxxxxxx11	WGM[11:10]	Fast PWM, TOP=OCR1A, Update at OCR TOP
-	
-		TCCR1A =	0b00100011;
-	
-		//			0b00011000	WGM[13:12]	Fast PWM TOP=OCR1A UPDATE=TOP, Compare output on pin
-		//			0b00000001	CS			clk	I/O/1 (No prescaling)
-	
-		TCCR1B =	0b00011001;
-							
-		// "The actual OC1x value will only be visible on the port pin if the data direction for the port pin is set as output (DDR_OC1x)."
-		// We set to output mode on startup
+		OCR1A = 64;		// TODO: THis should give us hard coded 75% duty cycle
+		
+		
+		OCR1C = 255;	// COunter top value - resets to zero when we get here
 												
 	}
 	
@@ -410,6 +378,20 @@ void setLEDsOff() {
 	setWhiteLED(0);
 }
 
+// This function is copied right from the data sheet
+// Note we can not use the library function becuase it has a bug that cuases intermitant resets
+
+void WDT_off(void)
+{
+	wdt_reset();
+	/* Clear WDRF in MCUSR */
+	MCUSR = 0x00;
+	/* Write logical one to WDCE and WDE */
+	WDTCR |= (1<<WDCE) | (1<<WDE);
+	/* Turn off WDT */
+	WDTCR = 0x00;
+	}
+
 
 // Dummy ISRs for the pin change interrupts.
 // These will catch and wake on..
@@ -422,18 +404,16 @@ EMPTY_INTERRUPT( PCINT0_vect );
 	// This will just return back to the main program. 
 	// TODO: Figure out how to just put an IRET in the vector table to save time and code space.
 
-
-EMPTY_INTERRUPT( PCINT1_vect );
-
-	// This is a dummy routine. This is here just so the processor has something to do when it wakes up.
-	// This will just return back to the main program.
-	// TODO: Figure out how to just put an IRET in the vector table to save time and code space.
+	
 	
 	
 int main(void)
 {
 	
 	motorInit();				// Initialize the motor port to drive the MOSFET low
+	
+	setMotorPWM(0,0);
+	while (1);
 	
 	uint8_t watchDogResetFlag = MCUSR & _BV(WDRF);		/// Save the watchdog flag
 	
@@ -454,9 +434,7 @@ int main(void)
 	BUTTON_PORT |= _BV(BUTTON_BIT);		// Enable pull-up for button pin
 	
 	// Battery Charger status pin setup
-	
-	EOC_PORT |= _BV(EOC_BIT);				// Activate pull-up
-	
+		
 	CIP_PORT |= _BV( CIP_BIT);				// Activate pull-up
 	
 	_delay_us(1);							// Give the pull-ups a second to work	
@@ -581,22 +559,22 @@ int main(void)
 	
 		// Leave pull-up enabled
 	
-		PCMSK1 = _BV(BUTTON_INT);				// Enable interrupt on button pin so we wake on a press
+		PCMSK = _BV(BUTTON_INT);				// Enable interrupt on button pin so we wake on a press
 	
 	}
 	
-	PCMSK0 = _BV(EOC_INT) | _BV(CIP_INT);	// Enable interrupt on change in state-of-charge pin or end-of-charge pin no matter what
+	PCMSK = _BV(CIP_INT);	// Enable interrupt on change in state-of-charge pin or end-of-charge pin no matter what
 		
-	GIMSK |= _BV(PCIE1) | _BV(PCIE0);		// Enable both pin change interrupt vectors (each individual pin was also be enabled above)
+	GIMSK |= _BV(PCIE);		// Enable both pin change interrupt vectors (each individual pin was also be enabled above)
 			
 	// Clear pending interrupt flags. This way we will only get an interrupt if something changes
 	// after we read it. There is a race condition where something could change between the flag clear and the
 	// reads below, so code should be able to deal with possible redundant interrupt and worst case
 	// is that we get woken up an extra time and go back to sleep.	
 	
-	GIFR = _BV(PCIF1) | _BV(PCIF0);			// Clear interrupt flags so we will interrupt on any change after now...
+	GIFR = _BV(PCIF);						// Clear interrupt flag so we will interrupt on any change after now...
 																		
-	if ( !CIP_STATE_ACTIVE() && !EOC_STATE_ACTIVE()  ) {			// Check if conditions are ALREADY true since we only wake on change....
+	if ( !CIP_STATE_ACTIVE() ) {			// Check if conditions are ALREADY true since we only wake on change....
 			
 		// Ok, it is bedtime!
 												
@@ -608,12 +586,10 @@ int main(void)
 		// that causes intermittent unwanted resets.
 		
 		// Note interrupts are already clear when we get here, otherwise we would need to worry about getting interrupted between the two following lines
-		
-		WDTCSR |= _BV(WDCE) | _BV(WDE);		// In the same operation, write a logic one to WDCE and WDE.
-											// Note we use OR to preserve the prescaler
-		
-		WDTCSR = 0;							//	Within the next four clock cycles, in the same operation, write the WDE and WDP bits
-											// as desired, but with the WDCE bit cleared.
+
+
+		wdt_disable();
+		WDT_off();
 		
 		sleep_enable();							// "To enter any of the three sleep modes, the SE bit in MCUCR must be written to logic one and a SLEEP instruction must be executed."				
 		sei();                                  // Enable global interrupts. "When using the SEI instruction to enable interrupts, the instruction following SEI will be executed before any pending interrupts."		
@@ -622,7 +598,7 @@ int main(void)
 		// GOOD MORNING!
 		// If we get here, then a button push or change in charger status woke s up....
 			
-		sleep_disable();						// "To avoid the MCU entering the sleep mode unless it is the programmer?s purpose, it is recommended to write the Sleep Enable (SE) bit to one just before the execution of the SLEEP instruction and to clear it immediately after waking up."
+		sleep_disable();						// "To avoid the MCU entering the sleep mode unless it is the programmer’s purpose, it is recommended to write the Sleep Enable (SE) bit to one just before the execution of the SLEEP instruction and to clear it immediately after waking up."
 		
 		cli();									// We are awake now, and do don't care about interrupts anymore (out interrupt routines don't do anything anyway)
 				
@@ -640,13 +616,15 @@ int main(void)
 		// It can be terminated by battery charger change of state, low battery detection, button press back to 0 speed, or long button press
 		// All these changes terminate the loop in a reboot. 
 		
+		// TODO: Detect difference between fully charged and charer unplugged by looking at Vcc voltage
 		
-		if (EOC_STATE_ACTIVE())		{		// End of charge?
+		if (0)		{		// End of charge?
 			
 			motorOff();						//Turn motor off in case were running before plug went in
 			
 			setWhiteLED(255);				// White LED full on
 			
+			/*
 			
 			_delay_ms( JACK_DEBOUNCE_TIME_MS );
 			
@@ -654,9 +632,10 @@ int main(void)
 			// Note that this will watchdog timeout after 8 seconds and reboot us,
 			// After which we will immediately fall right back to here and continue to show the white LED
 			
+			*/
 			setWhiteLED(0);					// Turn it off now, for instant feedback if unplugged (otherwise it will be on for extra 250ms waiting for watchdog reset)
 			
-			// Charger unplugged, reboot for goo measure
+			// Charger unplugged, reboot for good measure
 									
 			REBOOT();
 			
