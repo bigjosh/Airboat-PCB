@@ -20,7 +20,9 @@
  -josh
  
 */
-     
+
+#include <assert.h>     
+
 // CPU speed in Hz. Needed for timing functions.
 // This is the default fuse setting and works fine for PWM frequencies up to about 10Khz (1% lowest duty), or 100KHz (10% lowest duty). 
 // This suits the current speed settings, but a high clock might be needed for higher PWM frequencies
@@ -41,6 +43,10 @@
 #define RED_LED_PORT PORTB
 #define RED_LED_DDR DDRB
 #define RED_LED_BIT 1
+
+#define RED_LED_BLINK_MS 200				// Blink Red LED on for this many milliseconds
+#define RED_LED_DUTY_PCT 10					// Red LED on duty cycle in percent. Should be low since we have no current limiting resistor.
+#define RED_LED_ON_TIME_US 10				// Red LED on phase time in us. Should be low since we have no current limiting resistor.
 
 
 // Inputs
@@ -174,9 +180,7 @@ void setMotorPWM( uint8_t match , uint8_t top ) {
 		
 		//         1		PWM1B			1 = Enable PWM B
 		//          11       COM1B			11 = Set the OC1B output line on compare match
-		//          10       COM1B			11 = Set the OC1B output line on compare match
 		GTCCR = 0b011100000;
-//		GTCCR = 0b010100000;
 		
 		
 		OCR1B = match;		// TODO: THis should give us hard coded 75% duty cycle
@@ -318,30 +322,49 @@ void updateMotor( uint16_t top, uint16_t normalizedDuty, uint8_t vccx10 ) {
 // Note that this just turns on the timer. For the LEDs to come on, we need to set the control bits to let the compare bits show up on the pins
 // Also note that we are running in inverted mode, which means there will be a tiny glitch each cycle at full power (I should have put the LEDs in backwards!)
 
-void enableTimer0() {
-		
-	TCNT0 = 0;		// Start timer counter at 0;
+void initLEDs() {
 	
-	TCCR0A = _BV( WGM01) | _BV( WGM00 ) ;	// Mode 3 Fast PWM TOP=0xff, update OCRx at BOTTOM
+	// These registers do not need to be explicity set since these are default values	
+	//OCR0A = 0;		// Start with LEDs at 0% duty
+	//OCR0B = 0;
 		
-		//   0bxxxx0xxx	-~WGM02				Mode 3 Fast PWM TOP=0xff, update OCRx at BOTTOM
-		//	 0bxxxxx001 CS01				clk/1 prescaler
-		//   ===========
-	TCCR0B = 0b00000001;	
+	//TCNT0 = 0;		// Start timer counter at 0;
 	
-	OCR0A = 0;		// Start with LEDs off
-	OCR0B = 0;	
+	TCCR0A =
+		_BV(COM0A1) | _BV(COM0A0) |			// Set OC0A/OC0B on Compare Match, clear OC0A/OC0B at BOTTOM (inverting mode)
+		_BV(COM0B1) | _BV(COM0B0) |			// Set OC0A/OC0B on Compare Match, clear OC0A/OC0B at BOTTOM (inverting mode)
 	
+		_BV(WGM01)  | _BV(WGM00)			// Mode 3 Fast PWM TOP=0xff, update OCRx at BOTTOM
+	
+	;
+
+
+	// Set outputs to 1 (LEDs off)
+	WHITE_LED_PORT |= _BV(WHITE_LED_BIT);
+	RED_LED_PORT |= _BV(RED_LED_BIT);
+	
+	// Set pins to output mode
+	WHITE_LED_DDR |= _BV( WHITE_LED_BIT);
+	RED_LED_DDR |= _BV(RED_LED_BIT);
+			
+	
+}
+
+
+void enableLEDs() {
 		
+	TCCR0B = _BV(CS00);			// Enable timer. Clock/1
+				
 }
 
 
 void disableTimer0() {
 
-	TCCR0B = 0;			// No clock, timer stopped. 
+	TCCR0B = 0;				// No clock, timer stopped. 
 		
 }
 
+// TODO: Makes these normalized for Vcc voltage? 
 
 // Set brightness of LEDs. 0=off, 255=full on
 
@@ -349,45 +372,102 @@ void setWhiteLED( uint8_t b ) {
 	
 	if (b==0)	{	// Off
 		
-		WHITE_LED_PORT &= ~_BV(WHITE_LED_BIT);				// Normal port Output to low 			
 		TCCR0A &= ~ ( _BV( COM0A1  ) | _BV( COM0A0 ) );		// Normal port operation, OC0A disconnected (happens to hold true for all modes)
+															// This will leave the pin at 1, which was set in initLEDs()
 	
 	} else {
 		
-		b/=16;												// Account for missing current limiting resistor - empirically found
+		b/=2;												// Account for missing current limiting resistor - empirically found
 		
-		OCR0A = ~b;											// Set the compare register	- double buffered so will update at next top	
+		OCR0A = b;											// Set the compare register	- double buffered so will update at next top	
 		TCCR0A |= ( _BV( COM0A1  ) | _BV( COM0A0 ) );		// Set OC0A on Compare Match, Clear OC0A at BOTTOM (inverting mode)
 						
 	}		
 		
 }
 
+
+// Set brightness of LEDs. 0=off, 255=full on
+
 void setRedLED( uint8_t b ) {
-		
+	
 	if (b==0)	{	// Off
 		
-		RED_LED_PORT &= ~_BV(RED_LED_BIT);					// Normal port output to low	
-		TCCR0A &= ~ ( _BV( COM0B1  ) | _BV( COM0B0 ) );		// Normal port operation, OC0B disconnected (happens to hold true for all modes)
+		TCCR0A &= ~ ( _BV( COM0B1  ) | _BV( COM0B0 ) );		// Normal port operation, OC0A disconnected (happens to hold true for all modes)
+		// This will leave the pin at 1, which was set in initLEDs()
 		
-	} else {
+		} else {
 		
-		b/=16;												// Account for missing current limiting resistor - empirically found
+		b/=2;												// Account for missing current limiting resistor - empirically found
 		
-		OCR0B = ~b;											// Set the compare register	- double buffered so will update at next top	
-		TCCR0A |= ( _BV( COM0B1  ) | _BV( COM0B0 ) );		// Set OC0B on Compare Match, Clear OC0B at BOTTOM (inverting mode)
+		OCR0B = b;											// Set the compare register	- double buffered so will update at next top
+		TCCR0A |= ( _BV( COM0B1  ) | _BV( COM0B0 ) );		// Set OC0A on Compare Match, Clear OC0A at BOTTOM (inverting mode)
 		
 	}
 	
 }
 
+
+
+// Blinks the Red LED on briefly
+
+/*
+
+#define RED_LED_CYCLE_TIME_US (( RED_LED_ON_TIME_US * 100)/ RED_LED_DUTY_PCT ) 
+#define RED_LED_OFF_TIME_US ( RED_LED_CYCLE_TIME_US - RED_LED_ON_TIME_US )
+#define RED_LED_LOOP_COUNT ( RED_LED_BLINK_MS / (RED_LED_CYCLE_TIME_US*1000) )
+
+#if (RED_LED_LOOP_COUNT > UINT16_MAX )
+	#error "RED_LED_BLINK_MS too long, or RED_LED_ON_TIME_US too short"
+#endif
+
+
+#if (RED_LED_LOOP_COUNT <=0 )
+	#error "RED_LED_BLINK_MS too short, or RED_LED_ON_TIME_US too long"
+#endif
+
+
+#if (RED_LED_ON_TIME_US <=0 )
+	#error "RED_LED_ON_TIME_US too short"
+#endif
+
+#if (RED_LED_OFF_TIME_US <=0 )
+	#error "RED_LED_OFF_TIME_US too short"
+#endif
+
+
+
+
+#pragma message "on is" RED_LED_ON_TIME_US
+#pragma message "of is" RED_LED_OFF_TIME_US
+#pragma message "ct is" RED_LED_LOOP_COUNT 
+
+#pragma message "IT is" RED_LED_OFF_TIME_US
+
+void blinkRedLED() {
+	
+	RED_LED_DDR |= _BV(RED_LED_BIT);
+		
+	uint16_t c=RED_LED_LOOP_COUNT;
+
+	while (c--) {
+		RED_LED_PORT |= _BV(RED_LED_BIT);			// LED on
+		_delay_us(RED_LED_ON_TIME_US);
+		RED_LED_PORT &= ~_BV(RED_LED_BIT);			// LED off
+		_delay_us(RED_LED_OFF_TIME_US);
+	}
+		
+}
+
+*/
+
 void setLEDsOff() {
-	setRedLED(0);
 	setWhiteLED(0);
+	setRedLED(0);
 }
 
 // This function is copied right from the data sheet
-// Note we can not use the library function becuase it has a bug that cuases intermitant resets
+// Note we can not use the library function because it has a bug that cuases intermitant resets
 
 void WDT_off(void)
 {
@@ -440,13 +520,74 @@ TCCR1 |= (1 << COM1A0);
 
 */ 
 
+initLEDs();
+enableLEDs();
+
+while (1) {
+	
+	for(uint8_t x=0; x<255; x++) {
+		
+		setWhiteLED( x );
+		_delay_ms(1);
+		
+		
+	}
+	
+	setWhiteLED(0);
+
+	//_delay_ms(1000);
+
+	for(uint8_t x=0; x<255; x++) {
+		
+		setRedLED( x );
+		_delay_ms(1);
+		
+		
+	}
+	
+	setRedLED(0);
+
+	
+	
+	for(uint8_t x=0; x<255; x++) {
+	
+		setRedLED( x );
+		_delay_ms(1);
+		setRedLED( 0);
+		
+		setWhiteLED(x);
+		_delay_ms(1);
+		setWhiteLED( 0);
+
+	
+	}
+
+
+	//_delay_ms(1000);
+	
+	
+	/*
+	RED_LED_PORT |= _BV( RED_LED_BIT );
+	_delay_ms(100);
+	RED_LED_PORT &= ~_BV( RED_LED_BIT );
+	_delay_ms(100);
+	*/
+	
+}
+
 
 	motorInit();				// Initialize the motor port to drive the MOSFET low
 
+	CIP_PORT |= _BV( CIP_BIT);				// Activate pull-up
 
 	while (1) {
 		for (uint8_t i=0; i<255;i++)	 {
-			setMotorPWM(i,255);
+			
+			if ( CIP_STATE_ACTIVE() ) {							
+				setMotorPWM(i,255);
+			} else {
+				setMotorPWM(2,3);				
+			}
 			_delay_ms(10);
 		}
 	}
