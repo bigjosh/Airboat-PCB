@@ -54,8 +54,8 @@
 #define BUTTON_PORT PORTB
 #define BUTTON_PIN	PINB
 #define BUTTON_DDR  DDRB
-#define BUTTON_BIT	4
-#define BUTTON_INT	PCINT4
+#define BUTTON_BIT	3
+#define BUTTON_INT	PCINT3
 
 // Is button currently pressed? Pin has a pullup connected to ground though button, so a down reads a 0 on the pin. 
 // (Compiles down to a single SBIC instruction)
@@ -108,6 +108,16 @@
 #include <avr/wdt.h>
 #include <avr/pgmspace.h>
 
+
+void initButton() {
+	BUTTON_PORT|=_BV(BUTTON_BIT); // Enable button pull-up
+}		
+
+void disableButton() {
+	BUTTON_PORT &= ~_BV(BUTTON_BIT); // Disable button pull-up	
+}
+
+
 // Struct for holding speed steps
 
 // TODO: Add pre-scaller for more dynamic range
@@ -150,7 +160,7 @@ void motorOff(void) {
 // Initialize the motor pin. Sets to output mode, which will drive is LOW 
 // Call this as soon as possible after reset to keep the mosfet from floating and turning on the motor
 
-void motorInit() {
+void initMotor() {
 	
 	DDRB |= _BV(4);		// Set pin to output mode. It will already be low because ports default to 0 on reset
 
@@ -207,21 +217,25 @@ void setMotorPWM( uint8_t match , uint8_t top ) {
 
 uint8_t readVccVoltage(void) {
 	
-	// Select ADC inputs
-	// bit    76543210 
-	// REFS = 00       = Vcc used as Vref
-	// MUX  =   100001 = Single ended, 1.1V (Internal Ref) as Vin
-	
-	ADMUX = 0b00100001;
 	
 	/*
 	By default, the successive approximation circuitry requires an input clock frequency between 50
 	kHz and 200 kHz to get maximum resolution.
 	*/	
 				
-	// Enable ADC, set pre-scaller to /8 which will give a ADC clock of 8mHz/64 = 125kHz
+	// Enable ADC, set pre-scaller to /8 which will give a ADC clock of 1mHz/8 = 125kHz. 
 	
-	ADCSRA = _BV(ADEN) | _BV(ADPS1) | _BV(ADPS2);
+	ADCSRA = _BV(ADEN) | _BV(ADPS1) | _BV(ADPS0);
+
+
+	// Select ADC inputs
+	// bit    76543210
+	// REFS = 00 0     = Vcc used as Vref
+	// ADLAR=   0	   = Reading is right adjusted (only 8 most significant bits)
+	// MUX  =     1100 = Single ended, 1.1V (Internal Ref) as Vin (Called just Vbg in the datasheets- presumably for Band Gap)
+	
+	ADMUX = 0b00001100;
+
 	
 	/*
 		After switching to internal voltage reference the ADC requires a settling time of 1ms before
@@ -231,9 +245,6 @@ uint8_t readVccVoltage(void) {
 		
 	_delay_ms(1);
 				
-	/*
-		The first conversion after switching voltage source may be inaccurate, and the user is advised to discard this result.
-	*/
 	
 		
 	ADCSRA |= _BV(ADSC);				// Start a conversion
@@ -242,6 +253,17 @@ uint8_t readVccVoltage(void) {
 	while( ADCSRA & _BV( ADSC) ) ;		// Wait for 1st conversion to be ready...
 										//..and ignore the result
 						
+
+	/*
+		17.6.2 The first conversion after switching voltage source may be inaccurate, and the user is advised to discard this result.
+	*/
+
+
+	ADCSRA |= _BV(ADSC);				// Start a conversion
+
+
+	while( ADCSRA & _BV( ADSC) ) ;		// Wait for 2nd conversion to be ready...
+	
 		
 	/*
 		After the conversion is complete (ADIF is high), the conversion result can be found in the ADC
@@ -254,12 +276,15 @@ uint8_t readVccVoltage(void) {
 	// Note we could have used ADLAR left adjust mode and then only needed to read a single byte here
 		
 	uint8_t low  = ADCL;
-	uint8_t high = ADCH;
-
+	uint8_t high = ADCH; 
+	
 	uint16_t adc = (high << 8) | low;		// 0<= result <=1023
 			
 	// Compute a fixed point with 1 decimal place (i.e. 5v= 50)
 	//
+	// ADC = (Vin*1024)/Vref
+	// ADC = (1.1v * 1024) / Vcc
+	
 	// Vcc   =  (1.1v * 1024) / ADC
 	// Vcc10 = ((1.1v * 1024) / ADC ) * 10			->convert to 1 decimal fixed point
 	// Vcc10 = ((11   * 1024) / ADC )				->simplify to all 16-bit integer math
@@ -331,9 +356,6 @@ void initLEDs() {
 	//TCNT0 = 0;		// Start timer counter at 0;
 	
 	TCCR0A =
-		_BV(COM0A1) | _BV(COM0A0) |			// Set OC0A/OC0B on Compare Match, clear OC0A/OC0B at BOTTOM (inverting mode)
-		_BV(COM0B1) | _BV(COM0B0) |			// Set OC0A/OC0B on Compare Match, clear OC0A/OC0B at BOTTOM (inverting mode)
-	
 		_BV(WGM01)  | _BV(WGM00)			// Mode 3 Fast PWM TOP=0xff, update OCRx at BOTTOM
 	
 	;
@@ -368,18 +390,20 @@ void disableTimer0() {
 
 // Set brightness of LEDs. 0=off, 255=full on
 
+#define LED_DIM_FACTOR 2		// Reduce LED brightness by this to compensate for missing current limiting resistor. 
+
 void setWhiteLED( uint8_t b ) {
 	
 	if (b==0)	{	// Off
+		
+		// Note that we actually disconnect when brightness is 0 because otherwise the timer sends out a narrow spike on wraparound. 
 		
 		TCCR0A &= ~ ( _BV( COM0A1  ) | _BV( COM0A0 ) );		// Normal port operation, OC0A disconnected (happens to hold true for all modes)
 															// This will leave the pin at 1, which was set in initLEDs()
 	
 	} else {
-		
-		b/=2;												// Account for missing current limiting resistor - empirically found
-		
-		OCR0A = b;											// Set the compare register	- double buffered so will update at next top	
+			
+		OCR0A = b/LED_DIM_FACTOR;							// Set the compare register	- double buffered so will update at next top	
 		TCCR0A |= ( _BV( COM0A1  ) | _BV( COM0A0 ) );		// Set OC0A on Compare Match, Clear OC0A at BOTTOM (inverting mode)
 						
 	}		
@@ -392,21 +416,21 @@ void setWhiteLED( uint8_t b ) {
 void setRedLED( uint8_t b ) {
 	
 	if (b==0)	{	// Off
+
+		// Note that we actually disconnect when brightness is 0 because otherwise the timer sends out a narrow spike on wraparound.
 		
 		TCCR0A &= ~ ( _BV( COM0B1  ) | _BV( COM0B0 ) );		// Normal port operation, OC0A disconnected (happens to hold true for all modes)
+		
 		// This will leave the pin at 1, which was set in initLEDs()
 		
-		} else {
-		
-		b/=2;												// Account for missing current limiting resistor - empirically found
-		
-		OCR0B = b;											// Set the compare register	- double buffered so will update at next top
+	} else {
+				
+		OCR0B = b/LED_DIM_FACTOR;							// Set the compare register	- double buffered so will update at next top
 		TCCR0A |= ( _BV( COM0B1  ) | _BV( COM0B0 ) );		// Set OC0A on Compare Match, Clear OC0A at BOTTOM (inverting mode)
 		
 	}
 	
 }
-
 
 
 // Blinks the Red LED on briefly
@@ -466,6 +490,40 @@ void setLEDsOff() {
 	setRedLED(0);
 }
 
+// Display a 16 bit value on the red/white LED pins. 
+// White=clock, Red=data
+// Each bit is 50us wide, MSB first.
+// Helpful for debugging.
+
+void servicePort( uint16_t x ) {
+	
+	RED_LED_DDR |= _BV(RED_LED_BIT);
+	WHITE_LED_DDR |= _BV(WHITE_LED_BIT);
+	
+	uint16_t bitmask=1<<15;
+	
+	while (bitmask)	{
+		
+		if (x & bitmask ) {
+			RED_LED_PORT |= _BV( RED_LED_BIT);
+		}
+		
+		WHITE_LED_PORT|=_BV(WHITE_LED_BIT);
+		
+		_delay_us(25);
+
+		WHITE_LED_PORT &= ~_BV(WHITE_LED_BIT);
+		RED_LED_PORT &= ~_BV( RED_LED_BIT);
+		
+		_delay_us(25);
+		
+		bitmask >>=1;
+				
+	}
+	
+	
+}
+
 // This function is copied right from the data sheet
 // Note we can not use the library function because it has a bug that cuases intermitant resets
 
@@ -519,51 +577,54 @@ GTCCR |= (1 << PWM1B);
 TCCR1 |= (1 << COM1A0);
 
 */ 
-
+initButton();
 initLEDs();
+initMotor();
 enableLEDs();
+
+
 
 while (1) {
 	
-	for(uint8_t x=0; x<255; x++) {
+	
+	uint16_t v=readVccVoltage();
+	
+//	servicePort(v);
 		
-		setWhiteLED( x );
-		_delay_ms(1);
-		
-		
+	if (v>=45) {
+		setWhiteLED(255);
+		setRedLED(0);
+		} else if (v>=40) {
+		setWhiteLED(255);
+		setRedLED(255);
+		} else {
+		setWhiteLED(0);
+		setRedLED(255);
 	}
 	
-	setWhiteLED(0);
-
-	//_delay_ms(1000);
-
-	for(uint8_t x=0; x<255; x++) {
+}
+	
+while (1){	
+	
+	for(uint8_t y=0;y<255;y++) {
 		
-		setRedLED( x );
-		_delay_ms(1);
+		setMotorPWM(y,255);
 		
 		
-	}
-	
-	setRedLED(0);
-
-	
-	
-	for(uint8_t x=0; x<255; x++) {
-	
-		setRedLED( x );
-		_delay_ms(1);
-		setRedLED( 0);
 		
-		setWhiteLED(x);
-		_delay_ms(1);
-		setWhiteLED( 0);
-
-	
-	}
-
-
-	//_delay_ms(1000);
+		for(uint8_t x=0; x<255 && BUTTON_STATE_DOWN(); x++) {
+		
+			setWhiteLED( x );
+			_delay_ms(2);
+			setRedLED( 255-x );
+			_delay_ms(2);
+				
+		}
+		
+		setWhiteLED(255);
+		setRedLED(255);
+		
+		while (!BUTTON_STATE_DOWN());
 	
 	
 	/*
@@ -572,11 +633,11 @@ while (1) {
 	RED_LED_PORT &= ~_BV( RED_LED_BIT );
 	_delay_ms(100);
 	*/
-	
+	}
 }
 
 
-	motorInit();				// Initialize the motor port to drive the MOSFET low
+	initMotor();				// Initialize the motor port to drive the MOSFET low
 
 	CIP_PORT |= _BV( CIP_BIT);				// Activate pull-up
 
@@ -609,16 +670,12 @@ while (1) {
 								// "This means that WDE is always set when WDRF is set."
 								// IF we left this Set, then we could get watchdogged while sleeping
 								
-	wdt_enable( WDTO_8S );		// Give ourselves 8 seconds before forced reboot
-			
-	enableTimer0();				// Initialize the timer that also PWMs the LEDs
+	wdt_enable( WDTO_8S );		// Give ourselves 8 seconds before forced reboot			
 	
-	WHITE_LED_DDR	|= _BV(WHITE_LED_BIT);		// Pin to output
-	RED_LED_DDR		|= _BV(RED_LED_BIT);
-
+	initLEDs();
 	// Button sense pin setup	
 	
-	BUTTON_PORT |= _BV(BUTTON_BIT);		// Enable pull-up for button pin
+	INIT_BUTTON();			// Enable pull-up for button pin
 	
 	// Battery Charger status pin setup
 		
@@ -735,8 +792,7 @@ while (1) {
 		setRedLED(0);
 		setWhiteLED(0);
 		
-	
-		BUTTON_PORT &= ~_BV(BUTTON_BIT);	// Disable pull up to avoid running the battery down. 
+		disableButton();		// Disable pull up to avoid running the battery down. 
 	
 		// Do not enable interrupt on button pin change - we will require a charger state change to wake up
 		// Since the interrupt is not enabled, the pin will be disconnected during sleep so any floating
@@ -877,7 +933,7 @@ while (1) {
 			
 				motorOff();
 			
-				setWhiteLED(0);									// Needed becuase both LEDs might be on if we are in the middle of a button press
+				setWhiteLED(0);									// Needed because both LEDs might be on if we are in the middle of a button press
 			
 				setRedLED(255);
 			
