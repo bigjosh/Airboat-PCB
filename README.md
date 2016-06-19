@@ -82,6 +82,6 @@ Features
 
 Connections
 -----------
-The specified battery is a 160mAh Polymer Li-ion. Note that the battery polarity is swapped compared  to normal! Follow the markings on the board (positive battery wire towards LED/jack end  of the board).
+The specified battery is a 160mAh Polymer Li-ion. Positive battery wire connects to pad closest to the LED/jack end  of the board.
 
 The specified motor is a vibration type nominally rated for 130mA at 3V.
