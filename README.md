@@ -12,8 +12,8 @@ https://github.com/bigjosh/vibe-v2
 Changes include....
 
 1. Much smaller form factor.
-2. MCU switched to smaller ATTINY10 device.
-3. Battery charge controller switched to smaller MCP73831 device.
+2. MCU switched to smaller ATTINY25/45/85 device.
+3. Battery charge controller switched to smaller MCP73832 device.
 
 
 User Interface
@@ -76,12 +76,12 @@ Features
 --------
 * Current draw of <0.1uA when idle, so battery self-drain is likely the limiting factor for maximum off time.
 * Zero latency button debounce.
-* Motor output power is scaled to battery power so motor speed stays constant though battery discharge (at least until there is not enough voltage left to maintain speed). 
-* Code size of about 1.5K easily fits into cheap ATTINY24A parts. 
+* Motor output power is scaled to battery voltage so motor speed stays constant though battery discharge (at least until there is not enough voltage left to maintain speed). 
+* Code size of about 1.5K easily fits into cheap parts. 
 * A full processor WatchDog reset is executed every time the motor is turned off or the charger is unplugged. This hopefully makes the unit more robust to failures.
 
 Connections
 -----------
-The specified battery is a 160mAh Polymer Li-ion. Note that the battery polarity is swapped compared  to normal! Follow the markings on the board (positive battery wire towards middle of the board). Verify the polarity on the connector because it is non-standard and connecting a battery with reversed polarity will blow a protection diode. 
+The specified battery is a 160mAh Polymer Li-ion. Note that the battery polarity is swapped compared  to normal! Follow the markings on the board (positive battery wire towards LED/jack end  of the board).
 
 The specified motor is a vibration type nominally rated for 130mA at 3V.
