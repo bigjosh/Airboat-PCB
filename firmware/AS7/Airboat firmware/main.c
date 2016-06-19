@@ -21,8 +21,6 @@
  
 */
 
-#include <assert.h>     
-
 // CPU speed in Hz. Needed for timing functions.
 // This is the default fuse setting and works fine for PWM frequencies up to about 10Khz (1% lowest duty), or 100KHz (10% lowest duty). 
 // This suits the current speed settings, but a high clock might be needed for higher PWM frequencies
@@ -34,7 +32,7 @@
 #define CYCLES_PER_MS (F_CPU/1000UL)		// More convenient unit
 
 
-// Outputs
+// ** Outputs
 
 #define WHITE_LED_PORT PORTB
 #define WHITE_LED_DDR DDRB
@@ -44,12 +42,10 @@
 #define RED_LED_DDR DDRB
 #define RED_LED_BIT 1
 
-#define RED_LED_BLINK_MS 200				// Blink Red LED on for this many milliseconds
-#define RED_LED_DUTY_PCT 10					// Red LED on duty cycle in percent. Should be low since we have no current limiting resistor.
-#define RED_LED_ON_TIME_US 10				// Red LED on phase time in us. Should be low since we have no current limiting resistor.
 
+// ** Inputs
 
-// Inputs
+// * Button
 
 #define BUTTON_PORT PORTB
 #define BUTTON_PIN	PINB
@@ -57,15 +53,18 @@
 #define BUTTON_BIT	3
 #define BUTTON_INT	PCINT3
 
-// Is button currently pressed? Pin has a pullup connected to ground though button, so a down reads a 0 on the pin. 
+// Is button currently pressed? Pin has a pull-up connected to ground though button, so a down reads as 0 on the pin. 
 // (Compiles down to a single SBIC instruction)
+
 #define BUTTON_STATE_DOWN()	((BUTTON_PIN & _BV(BUTTON_BIT))==0)
 
+// * CIP
 
 // CIP is the charge-in-progress signal. It s active LOW when battery is charging.
 // High when battery is full or when no charger is attached. 
 // It is connected to the STAT line from the battery controller
-// Note we must be pull up this line
+// The STAT signal is open collector, so we must be pull up this line
+
 #define CIP_PORT PORTB
 #define CIP_PIN  PINB
 #define CIP_DDR	 DDRB
@@ -74,18 +73,13 @@
 
 // CIP is pulled LOW by battery charger to indicate Charge In Progress
 // (Compiles down to a single SBIC instruction)
+
 #define CIP_STATE_ACTIVE()		((CIP_PIN & _BV(CIP_BIT))==0)
 
-#define BUTTON_DEBOUNCE_TIME_MS 25			// How long to wait for a button press debounce
+// * Battery Voltage
 
-#define JACK_DEBOUNCE_TIME_MS 100			// How long to wait for a battery charger state change debounce
-
-#define BUTTON_LONG_PRESS_MS 500			// How long to hold down button to be considered a long press rather than a push
-											// Long press immediately turns off motor without needing to cycle though remaining speeds
-											
-											
-#define BUTTON_TRANSIT_TIMEOUT_S	(10)	// How long does the button need to be held down for to enter transit lockout mode?		
-											// The first 8 seconds happens 
+// We use a trick to read the battery voltage from the Vcc pin...
+// https://wp.josh.com/2014/11/06/battery-fuel-guage-with-zero-parts-and-zero-pins-on-avr/
 
 // Different cutoffs because the drain of the motor on the battery lowers the voltage, which will recover when the 
 // motor is turned off
@@ -93,11 +87,29 @@
 #define LOW_BATTERY_VOLTS_WARMx10	(31-03)		// Low battery cutoff while running, 3.0 volts for battery less the 0.3V diode drop
 #define LOW_BATTERY_VOLTS_COLDx10	(33-03)		// Low battery cutoff to turn on   , 3.3 volts for battery less the 0.3V diode drop
 
-#define LOW_BATTERY_LED_ONTIME_MS (1000)	// Show low battery by flashing red LED for 1 second
+#define CHARGER_VOLTAGE_THRESHOLD   (45-03)		// If we see this voltage or more on Vcc, then we are connected to a charger
 
-#define BUTTON_FEEDBACK_BRIGHTNESS 100		// Blink the LEDs when the button is pressed at this brightness
+
+// ** UI
+
+#define BUTTON_DEBOUNCE_TIME_MS 25			// How long to wait for a button press debounce
+
+#define JACK_DEBOUNCE_TIME_MS 100			// How long to wait for a battery charger state change debounce
+
+#define BUTTON_LONG_PRESS_MS 500			// How long to hold down button to be considered a long press rather than a push
+											// Long press immediately turns off motor without needing to cycle though remaining speeds
+
+#define BUTTON_TRANSIT_TIMEOUT_S (10)		// How long does the button need to be held down for to enter transit lockout mode?
+
+
+#define LOW_BATTERY_LED_ONTIME_MS (1000)	// We show low battery by flashing red LED this long before shutting down.
+#define LOW_BATTERY_LED_BRIGHTNESS_PCT (100)// We show low battery by flashing red LED this long before shutting down (percent,100=full brightness).
+
+#define BUTTON_FEEDBACK_BRIGHTNESS_PCT (100)// We blink the LED when the button is pressed. Use this brightness (percent,100=full brightness).
 
 #define REBOOT() 	{wdt_enable( WDTO_30MS);while(1);}		// Use watchdog to reset MPU. Note that this is sometimes used to also debounce button so probably not quicker than 32ms
+	
+#define PCT_TO_255(x) ((x*100)/255)			// Convert a human friendly percent to 0-255 scale
 
 #include <avr/io.h>
 #include <util/delay.h>
@@ -111,72 +123,51 @@
 
 void initButton() {
 	BUTTON_PORT|=_BV(BUTTON_BIT); // Enable button pull-up
+	
 }		
 
 void disableButton() {
 	BUTTON_PORT &= ~_BV(BUTTON_BIT); // Disable button pull-up	
 }
 
-
-// Struct for holding speed steps
-
-// TODO: Add pre-scaller for more dynamic range
-
-typedef struct {
-		uint16_t normailzedDuty;			// Duty cycle normalized to 4.2 volts Vcc. 0=off, 0xffff=full on at 4.2 volts power
-		uint16_t top;						// Top value, which determines the PWM frequency where 	f = F_CPU/top	
-} speedStepStruct;
-
-
-	
-#define SPEED_STEP_COUNT 4
-
-const speedStepStruct speedSteps[SPEED_STEP_COUNT] PROGMEM = {
-	
-	{          0,    0 },			// step 0 = off
-	{		  12,  255 },
-	{	      35,  255 },
-	{	      99,  255 },
-		
-};
-
 // MOTOR FUNCTIONS
 // ===============
 // Note that register values are hard coded rather than #defined because they 
-// can not just be moved around.
+// can not just be moved around. They depend on the Timer hardware of the specific chip/pin. 
 
-// Motor is connected to pin OC1B
+// Motor is controller by an N-MOSFET which is connected to pin OC1B. 1 output turns motor on, 0 is off. 
 									
 // Turn the motor completely off- disconnects from PWM generator
 
-void motorOff(void) {
+static void motorOff(void) {
 
 		
 	GTCCR = 0;		// "Timer/Counter Comparator B disconnected from output pin OC1B"	
-					// Will revert back to PORT value, which is always zero
+					// Will revert back to PORT value, which we always keep at zero.
 		
 }
 
-// Initialize the motor pin. Sets to output mode, which will drive is LOW 
-// Call this as soon as possible after reset to keep the mosfet from floating and turning on the motor
+// Initialize the motor pin. Sets to output mode, which will drive pin LOW.
+// Call this as soon as possible after reset to keep the mosfet from floating and turning on the motor.
 
-void initMotor() {
+static void initMotor() {
 	
-	DDRB |= _BV(4);		// Set pin to output mode. It will already be low because ports default to 0 on reset
-
-	DDRB |= _BV(3);		// Set pin to output mode. It will already be low because ports default to 0 on reset
-		
+						// On ATTINYx5, OC1B happens to be an alternate function on pin PB4. 
+	DDRB |= _BV(4);		// Set pin to output mode. It will already be low because ports default to 0 on reset.
+	
 }
 
-// SetVFD motor PWM on pin 8/PA5/OC1B
-// Note: also uses OCR1A for TOP function.
-// Note: resets all used registers each time from scratch for safety from glitches
+// Set motor PWM
 
 // match sets the duty cycle and should be between 0 and top. 0=completely off, top=full on. 
 // top sets the frequency where PWM frequency = F_CPU/top. The minimum resolution allowed is 2-bit (top set to 0x0003).
 
+// Note: also uses OCR1C for TOP function.
+// Note: resets all used registers each time from scratch for safety from glitches. This is probably  unnecessary...
+// http://electronics.stackexchange.com/questions/139575/how-often-do-avrs-actually-glitch-and-need-a-watch-dog-reset-in-the-real-world/144318
 
-void setMotorPWM( uint8_t match , uint8_t top ) {
+
+static void setMotorPWM( uint8_t match , uint8_t top ) {
 			
 	if (match==0) {			// Special case this because the PWM generator still generates a pulse at 0 duty cycle
 							// "If the OCR1x is set equal to BOTTOM (0x0000) the output will be a narrow spike for each TOP+1 timer clock cycle."
@@ -185,18 +176,19 @@ void setMotorPWM( uint8_t match , uint8_t top ) {
 		
 	} else {
 		
+		//        01234567
+		//        ========
+		//        1         CTC1            1="When the CTC1 control bit is set (one), Timer/Counter1 is reset to $00 in the CPU clock cycle after a compare match with OCR1C register value."
 		//            0001	CS1[3:0]		0001=CK/1 in Sychonus mode  		(4kHz with built in 1mhz clock)
-		TCCR1 = 0b00000001;
+		TCCR1 = 0b10000001;
 		
-		//         1		PWM1B			1 = Enable PWM B
+		//         1		 PWM1B			1 = Enable PWM B
 		//          11       COM1B			11 = Set the OC1B output line on compare match
-		GTCCR = 0b011100000;
+		GTCCR = 0b011100000;		
 		
+		OCR1B = match;		
 		
-		OCR1B = match;		// TODO: THis should give us hard coded 75% duty cycle
-		
-		
-		OCR1C = top;	// COunter top value - resets to zero when we get here
+		OCR1C = top;	// Counter top value - resets to zero when we get here
 		
 		// Silicon bug:
 		// http://electronics.stackexchange.com/questions/97596/attiny85-pwm-why-does-com1a0-need-to-be-set-before-pwm-b-will-work
@@ -210,12 +202,15 @@ void setMotorPWM( uint8_t match , uint8_t top ) {
 // Returns the current Vcc voltage as a fixed point number with 1 implied decimal places, i.e.
 // 50 = 5 volts, 25 = 2.5 volts,  19 = 1.9 volts
 //
+// More info on this technique:
+// https://wp.josh.com/2014/11/06/battery-fuel-guage-with-zero-parts-and-zero-pins-on-avr/
+//
 // On each reading we: enable the ADC, take the measurement, and then disable the ADC for power savings.
 // This takes >1ms becuase the internal reference voltage must stabilize each time the ADC is enabled.
 // For faster readings, you could initialize once, and then take multiple fast readings, just make sure to
 // disable the ADC before going to sleep so you don't waste power. 
 
-uint8_t readVccVoltage(void) {
+static uint8_t readVccVoltage(void) {
 	
 	
 	/*
@@ -304,14 +299,14 @@ uint8_t readVccVoltage(void) {
 }
 
 // Set the motor to run at the specified duty cycle and frequency
-// The duty cycle is specified at 4.2 volts as a value 0-65535. It is adjusted to scale to the actual voltage. 
+// The duty cycle is specified at 4.2 volts as a value 0-255. It is adjusted to scale to the actual voltage. 
 // Of course if you specify 100% at 4.2v and only 3.8v is available, then it will just give 100% at the current voltage
 
 void updateMotor( uint16_t top, uint16_t normalizedDuty, uint8_t vccx10 ) {
 			
-	unsigned long voltageAdjustedDuty = (((normalizedDuty * 42UL ) / vccx10) );		// All dutys are normalized to 4.2 volts, so adjust to the current volatge level. Note that is could overflow an uint16 if the voltage is lower than the normal value. 
+	unsigned voltageAdjustedDuty = (((normalizedDuty * 42UL ) / vccx10) );		// All dutys are normalized to 4.2 volts, so adjust to the current volatge level. Note that is could overflow an uint16 if the voltage is lower than the normal value. 
 	
-	unsigned long voltageAdjusedMatch = (voltageAdjustedDuty  * top ) / 65535UL;	// Covert the duty that is scaled 0-65535 to a match that is scaled 0-top.
+	unsigned voltageAdjusedMatch = (voltageAdjustedDuty  * top ) / 65535UL;	// Covert the duty that is scaled 0-65535 to a match that is scaled 0-top.
 																					// Match = (duty/65535) * top, but we need to stay integer so switch the order
 																					// Keep as a long because it could be bigger than an int due to scaling because of a low voltage
 		
@@ -332,6 +327,31 @@ void updateMotor( uint16_t top, uint16_t normalizedDuty, uint8_t vccx10 ) {
 }
 
 
+// Predefined motor speed steps
+// These were determined empirically using the calibration controller and lots of trial and error
+// because there are complicated non-linearities and resonances. You really need to find these on actual
+// hardware in the actual product. 
+
+// TODO: Do we need a faster PLL clock to avoid audible PWM?
+
+typedef struct {
+	uint16_t normailzedDuty;			// Duty cycle normalized to 4.2 volts Vcc. 0=off, 0xffff=full on at 4.2 volts power
+	uint16_t top;						// Top value, which determines the PWM frequency where 	f = F_CPU/top
+} speedStepStruct;
+
+
+#define SPEED_STEP_COUNT 4
+
+const speedStepStruct speedSteps[SPEED_STEP_COUNT] PROGMEM = {
+	
+	{          0,    0 },			// step 0 = off
+	{		  30,  255 },
+	{	      50,  255 },
+	{	      80,  255 },
+	
+};
+
+
 // We use Timer0 for timing functions and also PWMing the LEDs
 
 #define TIMER0_PRESCALER	1
@@ -347,7 +367,7 @@ void updateMotor( uint16_t top, uint16_t normalizedDuty, uint8_t vccx10 ) {
 // Note that this just turns on the timer. For the LEDs to come on, we need to set the control bits to let the compare bits show up on the pins
 // Also note that we are running in inverted mode, which means there will be a tiny glitch each cycle at full power (I should have put the LEDs in backwards!)
 
-void initLEDs() {
+static void initLEDs() {
 	
 	// These registers do not need to be explicity set since these are default values	
 	//OCR0A = 0;		// Start with LEDs at 0% duty
@@ -373,14 +393,14 @@ void initLEDs() {
 }
 
 
-void enableLEDs() {
+static void enableLEDs() {
 		
 	TCCR0B = _BV(CS00);			// Enable timer. Clock/1
 				
 }
 
 
-void disableTimer0() {
+static void disableTimer0() {
 
 	TCCR0B = 0;				// No clock, timer stopped. 
 		
@@ -392,7 +412,7 @@ void disableTimer0() {
 
 #define LED_DIM_FACTOR 2		// Reduce LED brightness by this to compensate for missing current limiting resistor. 
 
-void setWhiteLED( uint8_t b ) {
+static void setWhiteLED( uint8_t b ) {
 	
 	if (b==0)	{	// Off
 		
@@ -413,7 +433,7 @@ void setWhiteLED( uint8_t b ) {
 
 // Set brightness of LEDs. 0=off, 255=full on
 
-void setRedLED( uint8_t b ) {
+static void setRedLED( uint8_t b ) {
 	
 	if (b==0)	{	// Off
 
@@ -432,58 +452,6 @@ void setRedLED( uint8_t b ) {
 	
 }
 
-
-// Blinks the Red LED on briefly
-
-/*
-
-#define RED_LED_CYCLE_TIME_US (( RED_LED_ON_TIME_US * 100)/ RED_LED_DUTY_PCT ) 
-#define RED_LED_OFF_TIME_US ( RED_LED_CYCLE_TIME_US - RED_LED_ON_TIME_US )
-#define RED_LED_LOOP_COUNT ( RED_LED_BLINK_MS / (RED_LED_CYCLE_TIME_US*1000) )
-
-#if (RED_LED_LOOP_COUNT > UINT16_MAX )
-	#error "RED_LED_BLINK_MS too long, or RED_LED_ON_TIME_US too short"
-#endif
-
-
-#if (RED_LED_LOOP_COUNT <=0 )
-	#error "RED_LED_BLINK_MS too short, or RED_LED_ON_TIME_US too long"
-#endif
-
-
-#if (RED_LED_ON_TIME_US <=0 )
-	#error "RED_LED_ON_TIME_US too short"
-#endif
-
-#if (RED_LED_OFF_TIME_US <=0 )
-	#error "RED_LED_OFF_TIME_US too short"
-#endif
-
-
-
-
-#pragma message "on is" RED_LED_ON_TIME_US
-#pragma message "of is" RED_LED_OFF_TIME_US
-#pragma message "ct is" RED_LED_LOOP_COUNT 
-
-#pragma message "IT is" RED_LED_OFF_TIME_US
-
-void blinkRedLED() {
-	
-	RED_LED_DDR |= _BV(RED_LED_BIT);
-		
-	uint16_t c=RED_LED_LOOP_COUNT;
-
-	while (c--) {
-		RED_LED_PORT |= _BV(RED_LED_BIT);			// LED on
-		_delay_us(RED_LED_ON_TIME_US);
-		RED_LED_PORT &= ~_BV(RED_LED_BIT);			// LED off
-		_delay_us(RED_LED_OFF_TIME_US);
-	}
-		
-}
-
-*/
 
 void setLEDsOff() {
 	setWhiteLED(0);
@@ -556,113 +524,19 @@ EMPTY_INTERRUPT( PCINT0_vect );
 int main(void)
 {
 
-/*
-// Enable PLL and async PCK for high-speed PWM
-//PLLCSR |= (1 << PLLE) | (1 << PCKE);
-
-// Set prescaler to PCK/2048
-//TCCR1 |= (1 << CS10) | (1 << CS11) | (0 << CS12) | (0 << CS13);
-TCCR1 |= (1 << CS10); //CK/1
-
-// Set OCR1B compare value and OCR1C TOP value
-OCR1B = 228;
-OCR1C = 255;
-
-// Enable OCRB output on PB4, configure compare mode and enable PWM B
-DDRB |= (1 << PB4);
-GTCCR |= (1 << COM1B0) | (1 << COM1B1);
-GTCCR |= (1 << PWM1B);
-
-// Why is this necessary?
-TCCR1 |= (1 << COM1A0);
-
-*/ 
-initButton();
-initLEDs();
-initMotor();
-enableLEDs();
+	// TODO: Sort these out so only the proper ones in proper order
+	initButton();
+	initLEDs();
+	initMotor();
+	enableLEDs();
 
 
 
-while (1) {
-	
-	
-	uint16_t v=readVccVoltage();
-	
-//	servicePort(v);
-		
-	if (v>=45) {
-		setWhiteLED(255);
-		setRedLED(0);
-		} else if (v>=40) {
-		setWhiteLED(255);
-		setRedLED(255);
-		} else {
-		setWhiteLED(0);
-		setRedLED(255);
-	}
-	
-}
-	
-while (1){	
-	
-	for(uint8_t y=0;y<255;y++) {
-		
-		setMotorPWM(y,255);
-		
-		
-		
-		for(uint8_t x=0; x<255 && BUTTON_STATE_DOWN(); x++) {
-		
-			setWhiteLED( x );
-			_delay_ms(2);
-			setRedLED( 255-x );
-			_delay_ms(2);
-				
-		}
-		
-		setWhiteLED(255);
-		setRedLED(255);
-		
-		while (!BUTTON_STATE_DOWN());
-	
-	
-	/*
-	RED_LED_PORT |= _BV( RED_LED_BIT );
-	_delay_ms(100);
-	RED_LED_PORT &= ~_BV( RED_LED_BIT );
-	_delay_ms(100);
-	*/
-	}
-}
 
 
 	initMotor();				// Initialize the motor port to drive the MOSFET low
-
-	CIP_PORT |= _BV( CIP_BIT);				// Activate pull-up
-
-	while (1) {
-		for (uint8_t i=0; i<255;i++)	 {
-			
-			if ( CIP_STATE_ACTIVE() ) {							
-				setMotorPWM(i,255);
-			} else {
-				setMotorPWM(2,3);				
-			}
-			_delay_ms(10);
-		}
-	}
-	
-	while (1) {
-		PORTB |= _BV( 0);
-		_delay_ms(100);
-		PORTB &= ~_BV(0);
-		_delay_ms(100);
-	}
-	
-	
-	while (1);
-	
+								// Do this 1st thing on reset so the MSOFET won't float and accedentally turn on the motor. 
+									
 	uint8_t watchDogResetFlag = MCUSR & _BV(WDRF);		/// Save the watchdog flag
 	
 	MCUSR &= ~ _BV( WDRF );		// Clear the watchdog flag
@@ -672,14 +546,16 @@ while (1){
 								
 	wdt_enable( WDTO_8S );		// Give ourselves 8 seconds before forced reboot			
 	
-	initLEDs();
-	// Button sense pin setup	
+	initLEDs();					// Set LEDs to HIGH (off, no current)
 	
-	INIT_BUTTON();			// Enable pull-up for button pin
+	// Button sense pin setup		
+	initButton();				// Enable pull-up for button pin
 	
 	// Battery Charger status pin setup
 		
-	CIP_PORT |= _BV( CIP_BIT);				// Activate pull-up
+	CIP_PORT |= _BV( CIP_BIT);				// Activate pull-up, prevent floating input
+											// If the CIP is actually low, that means we are charging so we don't need to worry about
+											// darining the battery. 
 	
 	_delay_us(1);							// Give the pull-ups a second to work	
 			
@@ -689,7 +565,8 @@ while (1){
 				
 		// Blink back and forth to show LEDs work and solicit a button press	
 		
-			
+		//enableLEDs();			// Turn on PWM timer
+					
 		for(uint8_t i=0;i<100 && !BUTTON_STATE_DOWN(); i++ ) {
 			
 			setRedLED(255);
@@ -712,9 +589,14 @@ while (1){
 		}
 				
 		_delay_ms(BUTTON_DEBOUNCE_TIME_MS);
+		
 								
 		// TODO: Put more code here for some testing and feedback on initial battery connection at the factory.
 		
+		// TODO: I think we want 
+		
+		// TODO: RESET here so we come back up with a clean watchdog? I think that is better so next part is always same state
+				
 	}
 												
 	// Ready to begin normal operation!	
@@ -742,7 +624,8 @@ while (1){
 			// reset because the button was held down for more than 8 secs. Otherwise user
 			// sees an odd blink pattern. 
 			
-			setWhiteLED(0);
+			// TODO: Does this need to be explicit?
+			//setWhiteLED(0);
 			
 			// Leave the white LED off for 900 ms or until the button goes up
 			
@@ -751,7 +634,7 @@ while (1){
 			}
 			
 						
-			setWhiteLED(BUTTON_FEEDBACK_BRIGHTNESS);
+			setWhiteLED( PCT_TO_255(BUTTON_FEEDBACK_BRIGHTNESS_PCT) );
 			
 			// Leave the white LED on for 100 ms or until the button goes up
 			// Could do this as a single _delay_ms(100) but that might feel un-responsive
@@ -806,9 +689,20 @@ while (1){
 	
 	}
 	
-	PCMSK = _BV(CIP_INT);	// Enable interrupt on change in state-of-charge pin or end-of-charge pin no matter what
+	// TODO: THis is a hack. Why is button INT not firing?	
+	//	PCMSK = _BV(BUTTON_INT);				// Enable interrupt on button pin so we wake on a press
+	
+	
+	/*
+	if (readVccVoltage()>=CHARGER_VOLTAGE_THRESHOLD) {			// Are we connected to charger?
 		
-	GIMSK |= _BV(PCIE);		// Enable both pin change interrupt vectors (each individual pin was also be enabled above)
+	}
+	
+	*/
+	
+	PCMSK |= _BV(CIP_INT);	// Enable interrupt on change in state-of-charge pin no matter what
+		
+	GIMSK |= _BV(PCIE);		// Enable pin change interrupt vector. Activates INTs on CIP always and on button only if we are not in stuck button mode.
 			
 	// Clear pending interrupt flags. This way we will only get an interrupt if something changes
 	// after we read it. There is a race condition where something could change between the flag clear and the
@@ -818,6 +712,9 @@ while (1){
 	GIFR = _BV(PCIF);						// Clear interrupt flag so we will interrupt on any change after now...
 																		
 	if ( !CIP_STATE_ACTIVE() ) {			// Check if conditions are ALREADY true since we only wake on change....
+
+				
+
 			
 		// Ok, it is bedtime!
 												
@@ -829,7 +726,6 @@ while (1){
 		// that causes intermittent unwanted resets.
 		
 		// Note interrupts are already clear when we get here, otherwise we would need to worry about getting interrupted between the two following lines
-
 
 		wdt_disable();
 		WDT_off();
@@ -855,11 +751,12 @@ while (1){
 			
 	while (1)	{		
 		
+		
 		// This main loop runs for as long as the motor is on. 
 		// It can be terminated by battery charger change of state, low battery detection, button press back to 0 speed, or long button press
 		// All these changes terminate the loop in a reboot. 
 		
-		// TODO: Detect difference between fully charged and charer unplugged by looking at Vcc voltage
+		// TODO: Detect difference between fully charged and charger unplugged by looking at Vcc voltage
 		
 		if (0)		{		// End of charge?
 			
@@ -927,12 +824,12 @@ while (1){
 				
 		uint8_t vccx10 = readVccVoltage();				// Capture the current power supply voltage. This takes ~1ms and will be needed multiple times below
 		
-		if ( vccx10 <= LOW_BATTERY_VOLTS_COLDx10) {
-			
+		if (vccx10 <= LOW_BATTERY_VOLTS_COLDx10) {
+						
 			if ( (currentSpeedStep==0) || ( vccx10 <= LOW_BATTERY_VOLTS_WARMx10) ) {	// Motor off, or running and really low?
 			
 				motorOff();
-			
+											
 				setWhiteLED(0);									// Needed because both LEDs might be on if we are in the middle of a button press
 			
 				setRedLED(255);
@@ -953,13 +850,18 @@ while (1){
 		
 		if (BUTTON_STATE_DOWN())	{		// Button pushed?
 			
-			setWhiteLED(BUTTON_FEEDBACK_BRIGHTNESS);
+			setWhiteLED( 255 );//PCT_TO_255( BUTTON_FEEDBACK_BRIGHTNESS_PCT ));
 			
 			_delay_ms(BUTTON_DEBOUNCE_TIME_MS);			// debounce going down...
 			
 			if ( currentSpeedStep ==0 ) {				// Special case first press turning on instantly
 				
-				updateMotor( pgm_read_word(&speedSteps[1].top) , pgm_read_word(&speedSteps[1].normailzedDuty), vccx10);		// Set new motor speed
+				setMotorPWM( 30 , 255);
+				
+				//updateMotor( 100 , 50 , 42 );		// Set new motor speed
+				
+				
+				//updateMotor( pgm_read_word(&speedSteps[1].top) , pgm_read_word(&speedSteps[1].normailzedDuty), vccx10);		// Set new motor speed
 
 			}
 			
@@ -1002,8 +904,13 @@ while (1){
 			}
 						
 		}
-											
-		updateMotor( pgm_read_word(&speedSteps[currentSpeedStep].top) , pgm_read_word(&speedSteps[currentSpeedStep].normailzedDuty), vccx10);		// Set new motor speed
+
+		//setMotorPWM( 10 * currentSpeedStep , 100);
+			
+		// TODO: Fix updatemotor to be voltage controlled
+		//updateMotor( pgm_read_word(&speedSteps[currentSpeedStep].top) , pgm_read_word(&speedSteps[currentSpeedStep].normailzedDuty), vccx10);		// Set new motor speed
+		
+		setMotorPWM( pgm_read_word(&speedSteps[currentSpeedStep].normailzedDuty),  pgm_read_word(&speedSteps[currentSpeedStep].top) );		// Set new motor speed
 		
 		if (buttonPressedFlag) {
 			
