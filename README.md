@@ -24,7 +24,7 @@ Device ships in Transit Lockout Mode to prevent inadvertently turning on while i
 
 You can put the device back into Transit Lockout Mode by holding the button down for longer than 10 seconds. Durring the countdown, the white LED will briefly flash once per second.
 
-After the countdown exprires, the  white LEDs will fade out to indicate that Transit Lockout Mode has been activated.
+After the countdown exprires, the  white LED will fade out to indicate that Transit Lockout Mode has been activated.
 
 Note: this mode also protects the unit from over discharging the battery in case the button gets stuck down because something is continuously pressing on it.
 
