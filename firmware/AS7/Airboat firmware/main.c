@@ -84,10 +84,10 @@
 // Different cutoffs because the drain of the motor on the battery lowers the voltage, which will recover when the 
 // motor is turned off
 
-#define LOW_BATTERY_VOLTS_WARMx10	(31-03)		// Low battery cutoff while running, 3.0 volts for battery less the 0.3V diode drop
+#define LOW_BATTERY_VOLTS_WARMx10	(31-03)		// Low battery cutoff while running, 3.1 volts for battery less the 0.3V diode drop
 #define LOW_BATTERY_VOLTS_COLDx10	(33-03)		// Low battery cutoff to turn on   , 3.3 volts for battery less the 0.3V diode drop
 
-#define CHARGER_VOLTAGE_THRESHOLD   (45-03)		// If we see this voltage or more on Vcc, then we are connected to a charger
+#define CHARGER_VOLTAGE_THRESHOLD   (45)		// If we see this voltage or more on Vcc, then we are connected to a charger. No diode drop between charger and MCU. 
 
 
 // ** UI
@@ -121,13 +121,24 @@
 #include <avr/pgmspace.h>
 
 
-void initButton() {
+static void initButton() {
 	BUTTON_PORT|=_BV(BUTTON_BIT); // Enable button pull-up
 	
 }		
 
-void disableButton() {
-	BUTTON_PORT &= ~_BV(BUTTON_BIT); // Disable button pull-up	
+static void disableButton() {
+	BUTTON_PORT &= ~_BV(BUTTON_BIT); // Disable button pull-up		
+}
+
+static void initCIP() {
+	
+	// Battery Charger status pin setup
+	
+	CIP_PORT |= _BV( CIP_BIT);				
+	// Activate pull-up, prevent floating input
+	// This input is connected to an open-drain on the battery charging chip. It pulls low during charging. 
+	// If the CIP is actually low, that means we are getting power from the charger so we don't need to worry about
+	// draining the battery.	
 }
 
 // MOTOR FUNCTIONS
@@ -153,7 +164,7 @@ static void motorOff(void) {
 static void initMotor() {
 	
 						// On ATTINYx5, OC1B happens to be an alternate function on pin PB4. 
-	DDRB |= _BV(4);		// Set pin to output mode. It will already be low because ports default to 0 on reset.
+	DDRB |= _BV(4);		// Set pin to output mode. It will already be low because IO ports default to 0 on reset.
 	
 }
 
@@ -523,19 +534,12 @@ EMPTY_INTERRUPT( PCINT0_vect );
 	
 int main(void)
 {
-
-	// TODO: Sort these out so only the proper ones in proper order
-	initButton();
-	initLEDs();
-	initMotor();
-	enableLEDs();
-
-
-
-
-
+	
 	initMotor();				// Initialize the motor port to drive the MOSFET low
-								// Do this 1st thing on reset so the MSOFET won't float and accedentally turn on the motor. 
+								// Do this 1st thing on reset so the MSOFET won't float and accidentally turn on the motor.
+	
+	
+	// Next, turn on the watchdog before anything else so we have the max protection. 
 									
 	uint8_t watchDogResetFlag = MCUSR & _BV(WDRF);		/// Save the watchdog flag
 	
@@ -546,16 +550,13 @@ int main(void)
 								
 	wdt_enable( WDTO_8S );		// Give ourselves 8 seconds before forced reboot			
 	
-	initLEDs();					// Set LEDs to HIGH (off, no current)
-	
-	// Button sense pin setup		
-	initButton();				// Enable pull-up for button pin
-	
-	// Battery Charger status pin setup
-		
-	CIP_PORT |= _BV( CIP_BIT);				// Activate pull-up, prevent floating input
-											// If the CIP is actually low, that means we are charging so we don't need to worry about
-											// darining the battery. 
+
+
+	// TODO: Sort these out so only the proper ones in proper order
+	initButton();
+	initLEDs();
+	enableLEDs();
+	initCIP();	
 	
 	_delay_us(1);							// Give the pull-ups a second to work	
 			
@@ -598,13 +599,33 @@ int main(void)
 		// TODO: RESET here so we come back up with a clean watchdog? I think that is better so next part is always same state
 				
 	}
+
+	/*		
+			
+	char state=0;			
+	while (1) {
+		while (BUTTON_STATE_DOWN()) 			wdt_reset();
+		while (!BUTTON_STATE_DOWN()) 			wdt_reset();
+		
+		_delay_ms(BUTTON_DEBOUNCE_TIME_MS);
+		state=!state;
+		if (state) {
+			setRedLED(255);
+			setWhiteLED(0);			
+		} else {
+			setRedLED(0);
+			setWhiteLED(255);			
+		}
+	}
+	
+	*/
 												
 	// Ready to begin normal operation!	
 	
 	
 	if (BUTTON_STATE_DOWN())	{		// Possible stuck button?
 		
-		// If we get here, either we just finished test mode and the button is Still down, in which case
+		// If we get here, either we just finished test mode and the button is still down, in which case
 		// we are testing to make sure it goes back up 
 		
 		// Otherwise we just reset and the button was down when we woke, so likely it is stuck down 
@@ -624,8 +645,6 @@ int main(void)
 			// reset because the button was held down for more than 8 secs. Otherwise user
 			// sees an odd blink pattern. 
 			
-			// TODO: Does this need to be explicit?
-			//setWhiteLED(0);
 			
 			// Leave the white LED off for 900 ms or until the button goes up
 			
@@ -643,15 +662,13 @@ int main(void)
 			for( uint8_t l=0; l<10 && BUTTON_STATE_DOWN() ; l++) {
 				_delay_ms(10);
 			}
+			
+			setWhiteLED(0);
 					
 			wdt_reset();		
 			
 		}
-		
-		
-		// Turn off LED before continuing
-		setWhiteLED(0);
-				
+							
 		// Debounce the possible button up transition 				
 		
 		_delay_ms(BUTTON_DEBOUNCE_TIME_MS);		
@@ -661,19 +678,19 @@ int main(void)
 	if (BUTTON_STATE_DOWN())	{			// Do we still have a stuck button?
 
 
-		// Indicate we are entering transit mode with a quick double flash of both LEDs		
-				
-		setRedLED(255);
-		setWhiteLED(255);
-		_delay_ms(100);
-		setRedLED(0);
-		setWhiteLED(0);
-		_delay_ms(100);
-		setRedLED(255);
-		setWhiteLED(255);
-		_delay_ms(100);
-		setRedLED(0);
-		setWhiteLED(0);
+		// Indicate we are entering transit mode with a 1 second fade out of the white LED
+		
+		_delay_ms(900);			// Don't break the nice visual pattern established durring the lockout sequence
+		
+		
+		uint8_t brightness=255;
+		
+		while(brightness--) {						
+			setWhiteLED(brightness);
+			_delay_ms( 1000/255);			// Whole sequence will take about 1 sec
+		}
+		
+		// We end with brightness=0 so LED is off.	
 		
 		disableButton();		// Disable pull up to avoid running the battery down. 
 	
@@ -713,10 +730,10 @@ int main(void)
 																		
 	if ( !CIP_STATE_ACTIVE() ) {			// Check if conditions are ALREADY true since we only wake on change....
 
-				
-
 			
 		// Ok, it is bedtime!
+		
+		disableTimer0();					// Turn off timer since we don't need LEDs while sleeping and timer will use power
 												
 		set_sleep_mode( SLEEP_MODE_PWR_DOWN );  // Go into deep sleep where only a pin change can wake us.. uses only ~0.1uA!
 					
@@ -747,6 +764,7 @@ int main(void)
 	// Ok, now we are running!!!
 	
 	// Motor speed
+	
 	uint8_t currentSpeedStep = 0;				// What motor speed setting are we currently on?
 			
 	while (1)	{		
