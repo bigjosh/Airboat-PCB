@@ -312,15 +312,14 @@ static uint8_t readVccVoltage(void) {
 // The duty cycle is specified at 4.2 volts as a value 0-255. It is adjusted to scale to the actual voltage. 
 // Of course if you specify 100% at 4.2v and only 3.8v is available, then it will just give 100% at the current voltage
 
-void updateMotor( uint16_t top, uint16_t normalizedDuty, uint8_t vccx10 ) {
-			
-	unsigned voltageAdjustedDuty = (((normalizedDuty * 42UL ) / vccx10) );		// All dutys are normalized to 4.2 volts, so adjust to the current volatge level. Note that is could overflow an uint16 if the voltage is lower than the normal value. 
+void updateMotor( uint8_t top, uint8_t normalizedDuty, uint8_t vccx10 ) {
 	
-	unsigned voltageAdjusedMatch = (voltageAdjustedDuty  * top ) / 65535UL;	// Covert the duty that is scaled 0-65535 to a match that is scaled 0-top.
-																					// Match = (duty/65535) * top, but we need to stay integer so switch the order
+	unsigned voltageAdjustedDuty = (((normalizedDuty * 42U ) / vccx10) );		// All dutys are normalized to 4.2 volts, so adjust to the current volatge level. Note that is could overflow an uint16 if the voltage is lower than the normal value. 
+	
+	unsigned voltageAdjusedMatch = (voltageAdjustedDuty  * top ) / 255UL;			// Covert the duty that is scaled 0-255 to a match that is scaled 0-top.
+																					// Match = (duty/255) * top, but we need to stay integer so switch the order
 																					// Keep as a long because it could be bigger than an int due to scaling because of a low voltage
-		
-	uint16_t match;
+	uint8_t match;
 	
 	if (voltageAdjusedMatch > top ) {		// Battery to low for requested duty, so give it all we've got
 		
@@ -328,7 +327,7 @@ void updateMotor( uint16_t top, uint16_t normalizedDuty, uint8_t vccx10 ) {
 		
 	} else {
 		
-		match = (uint16_t) voltageAdjusedMatch;		// We know that adjusted duty will fit into uint_16 here because it is less than top which is a uint16
+		match = voltageAdjusedMatch;		// We know that adjusted duty will fit into uint_16 here because it is less than top which is a uint16
 		
 	}
 			
@@ -497,8 +496,7 @@ void servicePort( uint16_t x ) {
 		
 		bitmask >>=1;
 				
-	}
-	
+	}	
 	
 }
 
@@ -625,28 +623,7 @@ int main(void)
 				
 	}
 
-	/*		
-			
-	char state=0;			
-	while (1) {
-		while (BUTTON_STATE_DOWN()) 			wdt_reset();
-		while (!BUTTON_STATE_DOWN()) 			wdt_reset();
-		
-		_delay_ms(BUTTON_DEBOUNCE_TIME_MS);
-		state=!state;
-		if (state) {
-			setRedLED(255);
-			setWhiteLED(0);			
-		} else {
-			setRedLED(0);
-			setWhiteLED(255);			
-		}
-	}
-	
-	*/
-
-
-												
+											
 	// Ready to begin normal operation!		
 	
 	if (BUTTON_STATE_DOWN())	{		// Possible stuck button?
@@ -791,18 +768,7 @@ int main(void)
 	}
 			
 	// Ok, now we are running!!!
-	
-/*
-	while (1) {
-		setRedLED(255);
-		setWhiteLED(0);
-		_delay_ms(BUTTON_DEBOUNCE_TIME_MS);
-		setRedLED(0);
-		setWhiteLED(255);
-		_delay_ms(BUTTON_DEBOUNCE_TIME_MS);			
-	}
-*/			
-	
+		
 	// Motor speed
 	
 	uint8_t currentSpeedStep = 0;				// What motor speed setting are we currently on?
@@ -883,9 +849,7 @@ int main(void)
 		uint8_t vccx10 = readVccVoltage();				// Capture the current power supply voltage. This takes ~1ms and will be needed multiple times below
 		
 		if (vccx10 <= LOW_BATTERY_VOLTS_COLDx10) {
-			
-
-						
+									
 			if ( (currentSpeedStep==0) || ( vccx10 <= LOW_BATTERY_VOLTS_WARMx10) ) {	// Motor off, or running and really low?
 			
 				motorOff();
@@ -915,13 +879,8 @@ int main(void)
 			_delay_ms(BUTTON_DEBOUNCE_TIME_MS);			// debounce going down...
 			
 			if ( currentSpeedStep ==0 ) {				// Special case first press turning on instantly
-				
-				setMotorPWM( 30 , 255);
-
-				//updateMotor( 100 , 50 , 42 );		// Set new motor speed
-				
-				
-				//updateMotor( pgm_read_word(&speedSteps[1].top) , pgm_read_word(&speedSteps[1].normailzedDuty), vccx10);		// Set new motor speed
+								
+				updateMotor( pgm_read_word(&speedSteps[1].top) , pgm_read_word(&speedSteps[1].normailzedDuty), vccx10);		// Set new motor speed
 
 			}
 			
@@ -964,14 +923,9 @@ int main(void)
 			}
 						
 		}
-
-		//setMotorPWM( 10 * currentSpeedStep , 100);
 			
-		// TODO: Fix updatemotor to be voltage controlled
-		//updateMotor( pgm_read_word(&speedSteps[currentSpeedStep].top) , pgm_read_word(&speedSteps[currentSpeedStep].normailzedDuty), vccx10);		// Set new motor speed
-		
-		setMotorPWM( pgm_read_word(&speedSteps[currentSpeedStep].normailzedDuty),  pgm_read_word(&speedSteps[currentSpeedStep].top) );		// Set new motor speed
-		
+		updateMotor( pgm_read_word(&speedSteps[currentSpeedStep].top) , pgm_read_word(&speedSteps[currentSpeedStep].normailzedDuty), vccx10);		// Set new motor speed
+				
 		if (buttonPressedFlag) {
 			
 			// Button released, white LED off again
