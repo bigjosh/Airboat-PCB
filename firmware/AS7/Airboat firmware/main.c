@@ -201,9 +201,8 @@ static void setMotorPWM( uint8_t match , uint8_t top ) {
 		
 		OCR1C = top;	// Counter top value - resets to zero when we get here
 		
-		// Silicon bug:
+		// Note that there is a silicon bug that might make this not work on older parts:
 		// http://electronics.stackexchange.com/questions/97596/attiny85-pwm-why-does-com1a0-need-to-be-set-before-pwm-b-will-work
-		TCCR1 |= (1 << COM1A0);		
 												
 	}
 	
@@ -411,7 +410,7 @@ static void enableLEDs() {
 }
 
 
-static void disableTimer0() {
+static void disableLEDs() {
 
 	TCCR0B = 0;				// No clock, timer stopped. 
 		
@@ -530,15 +529,39 @@ EMPTY_INTERRUPT( PCINT0_vect );
 	// TODO: Figure out how to just put an IRET in the vector table to save time and code space.
 
 	
+void motorTest() {
 	
+	// Set outputs to 1 (LEDs off)
+	WHITE_LED_PORT |= _BV(WHITE_LED_BIT);
+	RED_LED_PORT |= _BV(RED_LED_BIT);
+	
+	// Set pins to output mode
+	WHITE_LED_DDR |= _BV( WHITE_LED_BIT);
+	RED_LED_DDR |= _BV(RED_LED_BIT);
+
+		TCCR1 = 0b10000001;
+		
+		//         1		 PWM1B			1 = Enable PWM B
+		//          11       COM1B			11 = Set the OC1B output line on compare match
+		GTCCR = 0b011100000;
+		
+		OCR1B = 100;
+		
+		OCR1C = 255;	// Counter top value - resets to zero when we get here
+		
+		// Silicon bug:
+		// http://electronics.stackexchange.com/questions/97596/attiny85-pwm-why-does-com1a0-need-to-be-set-before-pwm-b-will-work
+	//	TCCR1 |= (1 << COM1A0);	
+	
+}
 	
 int main(void)
 {
+
 	
 	initMotor();				// Initialize the motor port to drive the MOSFET low
 								// Do this 1st thing on reset so the MSOFET won't float and accidentally turn on the motor.
-	
-	
+		
 	// Next, turn on the watchdog before anything else so we have the max protection. 
 									
 	uint8_t watchDogResetFlag = MCUSR & _BV(WDRF);		/// Save the watchdog flag
@@ -555,11 +578,13 @@ int main(void)
 	// TODO: Sort these out so only the proper ones in proper order
 	initButton();
 	initLEDs();
-	enableLEDs();
-	initCIP();	
-	
+	enableLEDs();		// DOnt' forget to disable this timer before sleep order else it will use power
+	initCIP();			// Enable the CIP pull-up. We will need it from here on out weather we sleep or run.
+		
 	_delay_us(1);							// Give the pull-ups a second to work	
-			
+	
+	
+				
 	if ( !watchDogResetFlag )		{		// Are we coming out of anything except for a WatchDog reset?
 		
 		// Cold boot, run test mode
@@ -619,9 +644,10 @@ int main(void)
 	}
 	
 	*/
+
+
 												
-	// Ready to begin normal operation!	
-	
+	// Ready to begin normal operation!		
 	
 	if (BUTTON_STATE_DOWN())	{		// Possible stuck button?
 		
@@ -633,7 +659,7 @@ int main(void)
 		
 		// Each pass of this loop takes ~1 sec.
 		
-		for( uint16_t t=0; (t <= BUTTON_TRANSIT_TIMEOUT_S) && BUTTON_STATE_DOWN(); t++ ) {
+		for( uint16_t t=0; (t < BUTTON_TRANSIT_TIMEOUT_S) && BUTTON_STATE_DOWN(); t++ ) {
 			
 			
 			// To indicate that we are in a stuck-button sequence, we will blink the white LED
@@ -706,6 +732,7 @@ int main(void)
 	
 	}
 	
+	
 	// TODO: THis is a hack. Why is button INT not firing?	
 	//	PCMSK = _BV(BUTTON_INT);				// Enable interrupt on button pin so we wake on a press
 	
@@ -716,6 +743,7 @@ int main(void)
 	}
 	
 	*/
+	
 	
 	PCMSK |= _BV(CIP_INT);	// Enable interrupt on change in state-of-charge pin no matter what
 		
@@ -733,7 +761,8 @@ int main(void)
 			
 		// Ok, it is bedtime!
 		
-		disableTimer0();					// Turn off timer since we don't need LEDs while sleeping and timer will use power
+		//disableLEDs();					// Turn off timer since we don't need LEDs while sleeping and timer will use power
+											// TODO: I think shutodnw mode kills the timers. Check and make sure!
 												
 		set_sleep_mode( SLEEP_MODE_PWR_DOWN );  // Go into deep sleep where only a pin change can wake us.. uses only ~0.1uA!
 					
@@ -754,7 +783,7 @@ int main(void)
 		// GOOD MORNING!
 		// If we get here, then a button push or change in charger status woke s up....
 			
-		sleep_disable();						// "To avoid the MCU entering the sleep mode unless it is the programmer’s purpose, it is recommended to write the Sleep Enable (SE) bit to one just before the execution of the SLEEP instruction and to clear it immediately after waking up."
+		sleep_disable();						// "To avoid the MCU entering the sleep mode unless it is the programmer's purpose, it is recommended to write the Sleep Enable (SE) bit to one just before the execution of the SLEEP instruction and to clear it immediately after waking up."
 		
 		cli();									// We are awake now, and do don't care about interrupts anymore (out interrupt routines don't do anything anyway)
 				
@@ -762,6 +791,17 @@ int main(void)
 	}
 			
 	// Ok, now we are running!!!
+	
+/*
+	while (1) {
+		setRedLED(255);
+		setWhiteLED(0);
+		_delay_ms(BUTTON_DEBOUNCE_TIME_MS);
+		setRedLED(0);
+		setWhiteLED(255);
+		_delay_ms(BUTTON_DEBOUNCE_TIME_MS);			
+	}
+*/			
 	
 	// Motor speed
 	
@@ -843,6 +883,8 @@ int main(void)
 		uint8_t vccx10 = readVccVoltage();				// Capture the current power supply voltage. This takes ~1ms and will be needed multiple times below
 		
 		if (vccx10 <= LOW_BATTERY_VOLTS_COLDx10) {
+			
+
 						
 			if ( (currentSpeedStep==0) || ( vccx10 <= LOW_BATTERY_VOLTS_WARMx10) ) {	// Motor off, or running and really low?
 			
@@ -855,7 +897,7 @@ int main(void)
 				_delay_ms(LOW_BATTERY_LED_ONTIME_MS);			// Show red LED to user to show low battery
 				
 				while (BUTTON_STATE_DOWN());					// Wait for button to be released if pressed
-																// Will watchdog timeout in 8 seconds if stuff
+																// Will watchdog timeout in 8 seconds if stuck, and then stuck button defense will take over
 				setRedLED(0);
 						
 				REBOOT();
@@ -868,14 +910,14 @@ int main(void)
 		
 		if (BUTTON_STATE_DOWN())	{		// Button pushed?
 			
-			setWhiteLED( 255 );//PCT_TO_255( BUTTON_FEEDBACK_BRIGHTNESS_PCT ));
+			setWhiteLED( 255 );//PCT_TO_255( BUTTON_FEEDBACK_BRIGHTNESS_PCT ));		// A bit of instant user feedback
 			
 			_delay_ms(BUTTON_DEBOUNCE_TIME_MS);			// debounce going down...
 			
 			if ( currentSpeedStep ==0 ) {				// Special case first press turning on instantly
 				
 				setMotorPWM( 30 , 255);
-				
+
 				//updateMotor( 100 , 50 , 42 );		// Set new motor speed
 				
 				
