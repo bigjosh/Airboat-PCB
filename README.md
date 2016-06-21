@@ -22,9 +22,11 @@ User Interface
 ###Transit Lockout Mode
 Device ships in Transit Lockout Mode to prevent inadvertently turning on while in transit. In this mode, the button is completely disconnected and non-functional. To escape from Transit Lockout Mode into normal operating mode, you must connect the unit to the charger.
 
-You can put the device back into Transit Lockout Mode by holding the button down for more than 10 seconds. Both red and white LEDs will quickly flash twice to indicate that Transit Lockout Mode has been activated.  
+You can put the device back into Transit Lockout Mode by holding the button down for longer than 10 seconds. Durring the countdown, the white LED will briefly flash once per second.
 
-Note: this mode also protects the unit from over discharging the battery in case the button gets stuck down because something is continuously pressing on it.  
+After the countdown exprires, the  white LEDs will fade out to indicate that Transit Lockout Mode has been activated.
+
+Note: this mode also protects the unit from over discharging the battery in case the button gets stuck down because something is continuously pressing on it.
 
 ###Normal Operating Mode
 Device is normally in a low-power off state.
