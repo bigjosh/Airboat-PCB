@@ -166,6 +166,18 @@ static void initMotor() {
 						// On ATTINYx5, OC1B happens to be an alternate function on pin PB4. 
 	DDRB |= _BV(4);		// Set pin to output mode. It will already be low because IO ports default to 0 on reset.
 	
+/*
+	PLLCSR |= _BV( PLLE );		// Enable the PLL clock
+	
+	while (! (PLLCSR & _BV(PLOCK)) );		// Wait for the clock to lock
+	
+	// This bit can be set only if PLLE bit is set. It is safe to set this bit only when the PLL is locked i.e the PLOCK bit is 1.
+	// The bit PCKE can only be set, if the PLL has been enabled earlier.
+	
+	PLLCSR |= _BV(PCKE);				// Switch timer1 (motor) to PCLK
+	
+	*/
+	
 }
 
 // Set motor PWM
@@ -190,8 +202,9 @@ static void setMotorPWM( uint8_t match , uint8_t top ) {
 		//        01234567
 		//        ========
 		//        1         CTC1            1="When the CTC1 control bit is set (one), Timer/Counter1 is reset to $00 in the CPU clock cycle after a compare match with OCR1C register value."
-		//            0001	CS1[3:0]		0001=CK/1 in Sychonus mode  		(4kHz with built in 1mhz clock)
-		TCCR1 = 0b10000001;
+
+		//            0111	CS1[3:0]		0011=CK/4 in Synchronous mode  		(4kHz with built in 1mhz clock)
+		TCCR1 = 0b10000110;
 		
 		//         1		 PWM1B			1 = Enable PWM B
 		//          11       COM1B			11 = Set the OC1B output line on compare match
@@ -354,7 +367,7 @@ typedef struct {
 const speedStepStruct speedSteps[SPEED_STEP_COUNT] PROGMEM = {
 	
 	{          0,    0 },			// step 0 = off
-	{		  30,  255 },
+	{		  15,  255 },
 	{	      50,  255 },
 	{	      80,  255 },
 	
