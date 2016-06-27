@@ -1,5 +1,15 @@
-These 3 files contain the same information in different formats. 
+The BOM file is in Digikey CSV format. 
 
-A live version of the BOM is available at...
+None of the parts are critical.
 
-https://docs.google.com/spreadsheets/d/1DJ4L0mpyu5pduNasJa129-OpFUWWm2bzT5Ja490cZhg/edit?usp=sharing
+The resistors and capacitors can be substiuted for any suitable part within at least +/- 20% of value.
+
+The U1 can be substiutied with any part in the line, although changing to a 45 or 85 will require a recompile of the 
+firmware, and changing to a different package will require changes to the footprint on the PCB.
+
+LEDs can be changed out for any part that has correct polarty and fits the pads 
+
+The battery charger chip M1 has a variant MCP73831 that should *not* be substituted without further testing becuase it could 
+potentially cause idle power leakage. 
+
+
