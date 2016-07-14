@@ -1,21 +1,32 @@
-﻿The Calibration Controller helps you find precise values for the VIBE's speed settings. It connects to a specially outfited VIBE device though the power jack so 
-settings can be tested interactively under real use conditions. 
+The Calibration Remote Controller connects to an AIRBOAT and lets you precisely adjust the motor control parameters to help find the best values for the AIRBOAT's speed settings. 
+ 
+<img src="DSC08125.JPG">
 
-<img src="/Calibration Controller/DSC08125.JPG">
+#Speed Parameters
 
-#Theory of Operation
+Each speed setting has two parameters – the DUTY and the FRQ. 
 
-Each speed setting on the VIBE has two parameters – the DUTY and the TOP. 
+The DUTY controls what percentage of the time the motor is getting power. It ranges from 0 (completely off) to 255 (always on). So, a value of about 128 means that the motor will be getting power about ½ the time. The motor is only rated for 3 volts but the battery is nominally 4.2 volts, so best not to run with DUTY set higher than about 186 for too long or the motor might over heat. 
 
-The DUTY controls what percentage of the time the motor is getting power. It ranges from 0 (completely off) to 65535 (always on). So, a value of about 32000 means that the motor will be getting power about ½ the time. The motor is only rated for 3 volts, so best not to run with DUTY set higher than about 40000 for too long or the motor might over heat. NOTE: We could someday add a “turbo” mode that severely over powers the motor for short bursts as long as the busts are short enough that the motor doesn’t get too hot. 
+>NOTE: We could someday add a “turbo” mode that severely over powers the motor for short bursts as long as the busts are short enough that the motor doesn’t get too hot. 
 
-The TOP controls how fast the motor is turned on and off. It ranges from 1 (1 million times per second) to 65535 (about 15 times per second).  As the TOP gets lower, the time between cycles get shorter and so there is less for the power setting. So, for example, with a TOP of 40000 there would probably be thousands of discrete DUTY settings that would be noticeably different whereas with a TOP of 20 there might only be 20 discrete power steps (so at TOP 200, a DUTY of 545 and a DUTY of 722 might actually feel the same).  NOTE: As you scan though the TOP values you will find some that are at frequencies that your ear can actually hear. We can someday use this to make the motor make beeps and sounds. 
+FRQ selects the frequency at which the motor is turned on and off and ranges from about 2Hz to 64KHz. Note that the steps between available frequencies are larger for lower frequencies.
+
+>NOTE: As you scan though the FRQ values you will find some that are at frequencies that your ear can actually hear. We can someday use this to make the motor make beeps and sounds. 
+
 
 #Usage
 
-To use the Remote Control, plug it into the special VIBE though the power port and then turn on the VIBE and select a speed using the button on the unit. 
+To use the Remote Control, plug it into an AIRBOAT with the calibration firmware enabled though the power port. 
 
-You can then use the Remote to update the settings for the currently selected speed. The LEFT and RIGHT buttons switch between DUTY and TOP, the UP and DOWN buttons change the value. Holding UP or DOWN will scroll the value with acceleration for big changes. 
+You can then use the Remote to update the speed settings.
+
+|Button|Function|
+|-|-|
+|LEFT & RIGHT|FRQ
+|UP & DOWN|DUTY
+
+Holding a button down will scroll the value with acceleration for big changes. 
 
 For reference, the current values are…
 
@@ -27,21 +38,53 @@ For reference, the current values are…
 
 Once you find values that you like for a given speed, write down the two numbers since once you switch to another speed or unplug the Remote, there is no easy way to get them back. 
 
+#Theory of Operation
+
+The controller communicates to the attached AIRBOAT by turning the power supplied though the jack on and off. Each time the power is on, the battery charger chip indicates a "charge in progress", so by turning the power on and off rapidly the controller can send bits to the AIRBOAT.
+
+## Data Format
+
+### Signals
+
+Each bit starts with the power off for at least 1ms. To start a bit, we turn the power on from the off state. The reciever synchronizes to this rising edge. 
+
+To send a 1 bit, the power is left on for 1ms.
+
+To send a 0 bit, the power is left on for 500us and then turned off for 500us.
+
+The reciever samples the bit 750us after the initial rising edge. 
+
+Adjecent bits are seporated by at least 1ms of off time.
+
+Bytes are sent most significant bit first. 
+
+Durring idle times, the power can remain on if you want to charge the battery. 
+
+Note that these times are constrained. 
+
+If the power is on for more than about 1.5ms and the battery is fully charged, then the COP will turn off even though power is still applied, so the data sampling should happen well before this. 
+
+Becuase there is a filtering capacitor across the power jack, it takes about 1ms for the power voltage to drop to 0V after we stop suppling power. The COP stops when it hits ~4.5 volts, which happens pretty quickly. 
+
+
+### Protocol
+
+A speed update consists of 5 bytes of 8 bits each.
+
+The first byte is always 0x55.
+
+The second byte is the duty cycle, which can be 0-TOP. 
+
+The third byte is the clock prescaller given as a power of 2. Valid values are 1 to 6, where 1 is no prescaler (direct clock of 128KHz) and 6 is clock/32 (128Khz/2^6 = 4Khz).
+
+The 4th byte is the TOP which can be 1-255. 
+
+The 5th byte is an XOR of all the previous bytes. 
+
+
 #Construction
 
-The controller is actually just an Arduino Uno with an [LED Keypad Shield](http://www.dfrobot.com/wiki/index.php?title=Arduino_LCD_KeyPad_Shield_%28SKU:_DFR0009%29). The two wires from the VIBE power plug connect...
+The controller is actually just an Arduino Uno with an [LED Keypad Shield](http://www.dfrobot.com/wiki/index.php?title=Arduino_LCD_KeyPad_Shield_%28SKU:_DFR0009%29). 
 
-|Lead| Pin |
-|---|---|
-|(+) |  A5|
-|(-) | GND |
+The data is output on digital pin 8. Becuase the pin can not output enough current to keep  CIP active for long, we use a transistor to switch the full 5V power coming from the Arduino header. It looks like this...
 
-On my cables, the (+) wire is the one with the white stripe on it. 
-
-To support the connection to the controller, the VIBE board must...
-
-* Have the [DATA_JACK fork](https://github.com/bigjosh/Vibe-V2/tree/data_jack/firmware/AS6/Vibe%20V2%20firmware) of the firmware installed.
-
-* Have an diode installed between the (+) side of the power jack and the 10uF cap connected to the battery charger.
-
- <img src="/Calibration%20Controller/Extra%20Diode%20For%20Controller.PNG">

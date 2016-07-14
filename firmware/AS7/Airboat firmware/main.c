@@ -21,11 +21,28 @@
  
 */
 
+
+
+/* 
+	FUSE SETTINGS:
+	
+	All default except for 
+	
+	CKDIV8 = No set (do not divide clock)
+	SUT_CKSEL = WDOSC_128KHZ_6CK_14CK_0MS (Internal 128Khz osc)
+	
+	We run on the super slow clock to avoid triggering FCC Part 15 compliance.
+	
+	Note that once these fuses are set, you need to use a 32Khz programming clock or slow to communicate with the chip. 
+*/
+
+
+
 // CPU speed in Hz. Needed for timing functions.
 // This is the default fuse setting and works fine for PWM frequencies up to about 10Khz (1% lowest duty), or 100KHz (10% lowest duty). 
 // This suits the current speed settings, but a high clock might be needed for higher PWM frequencies
 
-#define F_CPU 1000000						// Name used by delay.h 
+#define F_CPU 128000						// Name used by delay.h 
 
 #define CYCLES_PER_S F_CPU					// Better name
 
@@ -75,6 +92,15 @@
 // (Compiles down to a single SBIC instruction)
 
 #define CIP_STATE_ACTIVE()		((CIP_PIN & _BV(CIP_BIT))==0)
+
+
+// CIP as receive only serial port
+// Can can read data send at quickly switched charger voltage by looking at the CIP pin 
+// Speed is limited by out timing precision and also how fast the signal can rise and fall
+// Pulling the charger jack low for 0 bits makes the signal fall faster
+
+#define SERIAL_BPS			(1200)					// Run nice and slow at 1200 baud
+#define SERIAL_BITTIME_US	(1000000UL/SERIAL_BPS)
 
 // * Battery Voltage
 
@@ -190,7 +216,7 @@ static void setMotorPWM( uint8_t match , uint8_t top ) {
 		//        01234567
 		//        ========
 		//        1         CTC1            1="When the CTC1 control bit is set (one), Timer/Counter1 is reset to $00 in the CPU clock cycle after a compare match with OCR1C register value."
-		//            0001	CS1[3:0]		0001=CK/1 in Sychonus mode  		(4kHz with built in 1mhz clock)
+		//            0001	CS1[3:0]		0001=CK/1 in Synchronous mode  		
 		TCCR1 = 0b10000001;
 		
 		//         1		 PWM1B			1 = Enable PWM B
@@ -378,7 +404,7 @@ const speedStepStruct speedSteps[SPEED_STEP_COUNT] PROGMEM = {
 
 static void initLEDs() {
 	
-	// These registers do not need to be explicity set since these are default values	
+	// These registers do not need to be explicitly set since these are default values	
 	//OCR0A = 0;		// Start with LEDs at 0% duty
 	//OCR0B = 0;
 		
@@ -809,7 +835,13 @@ int main(void)
 		if (CIP_STATE_ACTIVE())		{		// Charging?
 			
 			motorOff();						//Turn motor off in case were running before plug went in
-						
+			
+			// Check for an incoming serial command on the charger port
+			
+//			_delay_us( SERIAL_BITTIME_US * 1.5 ); // Skip the start bit and land in the middle of the 1st data bit if there is one (top databit of the command byte must always be 0)
+			
+//			if (!CIP_STATE_ACTIVE())	{	// Could be a Data bit! Lets try to read more....
+										
 			uint8_t brightness=0;
 			int8_t direction=1;
 			
