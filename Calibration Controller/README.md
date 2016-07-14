@@ -46,6 +46,8 @@ The controller communicates to the attached AIRBOAT by turning the power supplie
 
 ### Signals
 
+![](controller-signals.jpg)
+
 Each bit starts with the power off for at least 1ms. To start a bit, we turn the power on from the off state. The reciever synchronizes to this rising edge. 
 
 To send a 1 bit, the power is left on for 1ms.
@@ -71,16 +73,15 @@ Becuase there is a filtering capacitor across the power jack, it takes about 1ms
 
 A speed update consists of 5 bytes of 8 bits each.
 
-The first byte is always 0x55.
+The first byte is always 0x55 to indicate a speed set command. 
 
-The second byte is the duty cycle, which can be 0-TOP. 
+The second byte is the duty cycle, which can be 0-255. 
 
-The third byte is the clock prescaller given as a power of 2. Valid values are 1 to 6, where 1 is no prescaler (direct clock of 128KHz) and 6 is clock/32 (128Khz/2^6 = 4Khz).
+The third byte is TOP value, which can be 1-255. This defines the frequency of the cycle in steps. 
 
-The 4th byte is the TOP which can be 1-255. 
+The fourth byte is the prescaler and can be 1-6. The clock is divided by the prescaler to generate the steps. A prescaler of "1" corresponds to 128K steps per seconds, "2" is 64K steps per second, etc.   
 
 The 5th byte is an XOR of all the previous bytes. 
-
 
 #Construction
 
@@ -88,3 +89,6 @@ The controller is actually just an Arduino Uno with an [LED Keypad Shield](http:
 
 The data is output on digital pin 8. Becuase the pin can not output enough current to keep  CIP active for long, we use a transistor to switch the full 5V power coming from the Arduino header. It looks like this...
 
+![](Controller-circuit.jpg)
+
+(Better to use a 1K resistor for more headroom on charging current). 
