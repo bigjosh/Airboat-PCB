@@ -48,25 +48,25 @@ The controller communicates to the attached AIRBOAT by turning the power supplie
 
 ![](controller-signals.jpg)
 
-Each bit starts with the power off for at least 1ms. To start a bit, we turn the power on from the off state. The reciever synchronizes to this rising edge. 
+Each bit starts with the power off for at least 1ms. To start a bit, we turn the power on from the off state. The receiver synchronizes to this rising edge. 
 
 To send a 1 bit, the power is left on for 1ms.
 
 To send a 0 bit, the power is left on for 500us and then turned off for 500us.
 
-The reciever samples the bit 750us after the initial rising edge. 
+The receiver samples the bit 750us after the initial rising edge. 
 
-Adjecent bits are seporated by at least 1ms of off time.
+Adjacent bits are separated by at least 1ms of off time.
 
 Bytes are sent most significant bit first. 
 
-Durring idle times, the power can remain on if you want to charge the battery. 
+During idle times, the power can remain on if you want to charge the battery. 
 
 Note that these times are constrained. 
 
 If the power is on for more than about 1.5ms and the battery is fully charged, then the COP will turn off even though power is still applied, so the data sampling should happen well before this. 
 
-Becuase there is a filtering capacitor across the power jack, it takes about 1ms for the power voltage to drop to 0V after we stop suppling power. The COP stops when it hits ~4.5 volts, which happens pretty quickly. 
+Because there is a filtering capacitor across the power jack, it takes about 1ms for the power voltage to drop to 0V after we stop supping power. The COP stops when it hits ~4.5 volts, which happens pretty quickly. 
 
 
 ### Protocol
