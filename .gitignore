@@ -14,6 +14,12 @@ $RECYCLE.BIN/
 *.msm
 *.msp
 
+# DipTrace temp files
+*.lib~
+*.eli~
+*.dch~
+*.dip~
+
 # =========================
 # Operating System Files
 # =========================
