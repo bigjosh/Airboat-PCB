@@ -5,7 +5,7 @@
     <ProjectVersion>7.0</ProjectVersion>
     <ToolchainName>com.Atmel.AVRGCC8.C</ToolchainName>
     <ProjectGuid>dce6c7e3-ee26-4d79-826b-08594b9ad897</ProjectGuid>
-    <avrdevice>ATtiny45</avrdevice>
+    <avrdevice>ATtiny25</avrdevice>
     <avrdeviceseries>none</avrdeviceseries>
     <OutputType>Executable</OutputType>
     <Language>C</Language>
@@ -38,13 +38,13 @@
         </dependencies>
       </framework-data>
     </AsfFrameworkConfig>
-    <avrtool>com.atmel.avrdbg.tool.avrdragon</avrtool>
-    <avrtoolserialnumber>00A200031957</avrtoolserialnumber>
-    <avrdeviceexpectedsignature>0x1E9206</avrdeviceexpectedsignature>
+    <avrtool>com.atmel.avrdbg.tool.stk600</avrtool>
+    <avrtoolserialnumber>004A8D6877B5</avrtoolserialnumber>
+    <avrdeviceexpectedsignature>0x1E9108</avrdeviceexpectedsignature>
     <com_atmel_avrdbg_tool_avrdragon>
       <ToolOptions>
         <InterfaceProperties>
-          <IspClock>125000</IspClock>
+          <IspClock>16097</IspClock>
         </InterfaceProperties>
         <InterfaceName>ISP</InterfaceName>
       </ToolOptions>
@@ -53,12 +53,23 @@
       <ToolName>AVR Dragon</ToolName>
     </com_atmel_avrdbg_tool_avrdragon>
     <avrtoolinterface>ISP</avrtoolinterface>
-    <avrtoolinterfaceclock>125000</avrtoolinterfaceclock>
+    <avrtoolinterfaceclock>25000</avrtoolinterfaceclock>
+    <com_atmel_avrdbg_tool_stk600>
+      <ToolOptions>
+        <InterfaceProperties>
+          <IspClock>25000</IspClock>
+        </InterfaceProperties>
+        <InterfaceName>ISP</InterfaceName>
+      </ToolOptions>
+      <ToolType>com.atmel.avrdbg.tool.stk600</ToolType>
+      <ToolNumber>004A8D6877B5</ToolNumber>
+      <ToolName>STK600</ToolName>
+    </com_atmel_avrdbg_tool_stk600>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)' == 'Release' ">
     <ToolchainSettings>
       <AvrGcc>
-        <avrgcc.common.Device>-mmcu=attiny45 -B "%24(PackRepoDir)\atmel\ATtiny_DFP\1.0.79\gcc\dev\attiny45"</avrgcc.common.Device>
+        <avrgcc.common.Device>-mmcu=attiny25 -B "%24(PackRepoDir)\atmel\ATtiny_DFP\1.0.79\gcc\dev\attiny25"</avrgcc.common.Device>
         <avrgcc.common.outputfiles.hex>True</avrgcc.common.outputfiles.hex>
         <avrgcc.common.outputfiles.lss>True</avrgcc.common.outputfiles.lss>
         <avrgcc.common.outputfiles.eep>True</avrgcc.common.outputfiles.eep>
@@ -96,7 +107,7 @@
   <PropertyGroup Condition=" '$(Configuration)' == 'Debug' ">
     <ToolchainSettings>
       <AvrGcc>
-        <avrgcc.common.Device>-mmcu=attiny45 -B "%24(PackRepoDir)\atmel\ATtiny_DFP\1.0.79\gcc\dev\attiny45"</avrgcc.common.Device>
+        <avrgcc.common.Device>-mmcu=attiny25 -B "%24(PackRepoDir)\atmel\ATtiny_DFP\1.0.79\gcc\dev\attiny25"</avrgcc.common.Device>
         <avrgcc.common.outputfiles.hex>True</avrgcc.common.outputfiles.hex>
         <avrgcc.common.outputfiles.lss>True</avrgcc.common.outputfiles.lss>
         <avrgcc.common.outputfiles.eep>True</avrgcc.common.outputfiles.eep>
