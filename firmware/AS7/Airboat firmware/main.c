@@ -48,6 +48,8 @@
 
 #define CYCLES_PER_MS (F_CPU/1000UL)		// More convenient unit
 
+#define US_PER_S	1000000					
+
 
 // ** Outputs
 
@@ -102,6 +104,7 @@
 #define SERIAL_BPS			(1200)					// Run nice and slow at 1200 baud
 #define SERIAL_BITTIME_US	(1000000UL/SERIAL_BPS)
 
+
 // * Battery Voltage
 
 // We use a trick to read the battery voltage from the Vcc pin...
@@ -113,7 +116,7 @@
 #define LOW_BATTERY_VOLTS_WARMx10	(31-03)		// Low battery cutoff while running, 3.1 volts for battery less the 0.3V diode drop
 #define LOW_BATTERY_VOLTS_COLDx10	(33-03)		// Low battery cutoff to turn on   , 3.3 volts for battery less the 0.3V diode drop
 
-#define CHARGER_VOLTAGE_THRESHOLD   (45)		// If we see this voltage or more on Vcc, then we are connected to a charger. No diode drop between charger and MCU. 
+#define CHARGER_VOLTAGE_THRESHOLD   (43)		// If we see this voltage or more on Vcc, then we are connected to a charger. One shottkey diode drop between charger and MCU. 
 
 
 // ** UI
@@ -334,6 +337,7 @@ static uint8_t readVccVoltage(void) {
 	return( vccx10 );
 	
 }
+
 
 // Set the motor to run at the specified duty cycle and frequency
 // The duty cycle is specified at 4.2 volts as a value 0-255. It is adjusted to scale to the actual voltage. 
@@ -583,7 +587,13 @@ void motorTest() {
 
 
 // Read a single byte from the CIP pin. 
-// This should be called immediately after the rising edge on CIP...
+// This should be called immediately after the rising edge on CIP.
+// Returns 0 on bad data. 
+
+// The timing values are hard coded because they are tightly constrained by hardware limits. More info here...
+//
+
+#define BIT_TIMEOUT_US 20000
 
 uint8_t readByte() {
 	
@@ -592,27 +602,53 @@ uint8_t readByte() {
 	
 	while (mask) {
 		
+		if (!CIP_STATE_ACTIVE()) {		// If we are on the first bit of a command, then we are already synced and CIP will already be active
+										// Otherwise we need to sync to it so we know exactly when to look for the data
+										
+			unsigned int countdown = 	( (F_CPU / US_PER_S ) * BIT_TIMEOUT_US  );	// Just get some basis in real time. We know that each loop pass *must* take at least 1 cycle so this establishes a bottom number of passes to have at least the TIMEOUT
+			
+			while (!CIP_STATE_ACTIVE()) {
+				countdown--;
+				if (countdown==0) {
+					return(0);							// We waited way too long for the next rising edge. 
+				}
+				
+			}
+						
+		}
+		
 		_delay_us(250);		// Put us in the middle of the high level sync part of the bit
 		
-		if (!CIP_STATE_ACTIVE()) return;		// If it is not high here, then we are not getting good data
+		if (!CIP_STATE_ACTIVE()) return(0);		// If it is not high here, then we are not getting good data
 		
 		_delay_us(500);		// Put us in the middle of the data section
 		
 		if (CIP_STATE_ACTIVE()) {			// If we are high here, then it is a 1 bit
 			
 			b|=mask;
-						
+			
+			setRedLED(0);
+			setWhiteLED(200);
+			
+			_delay_ms(100);
+			setWhiteLED(200);
+			
+		} else {
+			
+			setRedLED(0);
+			setWhiteLED(20);
+			_delay_ms(100);
+			setRedLED(0);
+									
 		}
 		
-		_delay_us(500);		// Put us in the middle of the data section
+		_delay_us(500);		// Put us in the middle of the trailing off phase
 		
-		if (CIP_STATE_ACTIVE()) return;		// Here we should be in the middle of trailing off period. If not, not good data so abort.
-		
-		
-				
-	}
+		if (CIP_STATE_ACTIVE()) return(0);		// Here we should be in the middle of trailing off period. If not, not good data so abort.
+							
+	}	
 	
-	
+	return( b );
 	
 }
 
@@ -622,11 +658,7 @@ uint8_t readByte() {
 
 uint8_t readCommand() {
 	
-	
-	
-
-	
-	
+	return(readByte());
 	
 	
 }
@@ -859,30 +891,7 @@ int main(void)
 		// All these changes terminate the loop in a reboot. 
 		
 		// TODO: Detect difference between fully charged and charger unplugged by looking at Vcc voltage
-		
-		if (0)		{		// End of charge?
-			
-			motorOff();						//Turn motor off in case were running before plug went in
-			
-			setWhiteLED(255);				// White LED full on
-			
-			/*
-			
-			_delay_ms( JACK_DEBOUNCE_TIME_MS );
-			
-			while (EOC_STATE_ACTIVE()); 	// White LED on for as long as we are charging....
-			// Note that this will watchdog timeout after 8 seconds and reboot us,
-			// After which we will immediately fall right back to here and continue to show the white LED
-			
-			*/
-			setWhiteLED(0);					// Turn it off now, for instant feedback if unplugged (otherwise it will be on for extra 250ms waiting for watchdog reset)
-			
-			// Charger unplugged, reboot for good measure
-									
-			REBOOT();
-			
-		}
-		
+				
 				
 		if (CIP_STATE_ACTIVE())		{		// Charging?
 			
@@ -928,7 +937,31 @@ int main(void)
 		}
 		
 				
-		uint8_t vccx10 = readVccVoltage();				// Capture the current power supply voltage. This takes ~1ms and will be needed multiple times below
+		uint8_t vccx10 = readVccVoltage();				// Capture the current power supply voltage. This takes ~1ms and will be needed multiple times below	
+		
+		if (readVccVoltage >= CHARGER_VOLTAGE_THRESHOLD )		{		// End of charge? If we are seeing a Vcc higher than the battery can produce, then we are attached to a charger. IF CIP is not active, then the battery is at end-of-charge. 
+			
+			motorOff();						// Turn motor off in case were running before plug went in
+			
+			setWhiteLED(255);				// White LED full on
+						
+			_delay_ms( JACK_DEBOUNCE_TIME_MS );
+			
+			while ( readVccVoltage() >= CHARGER_VOLTAGE_THRESHOLD ); 	// White LED on for as long as we are charging....
+			
+			// Note that this will watchdog timeout after 8 seconds and reboot us,
+			// After which we will immediately fall right back to here and continue to show the white LED
+			// This will cause a brief blink in the LED every 8 seconds, whic I think is good. 
+			
+			
+			setWhiteLED(0);					// Turn it off now, for instant feedback if unplugged (otherwise it will be on for extra 250ms waiting for watchdog reset)
+			
+			// Charger unplugged, reboot for good measure
+									
+			REBOOT();
+			
+		}
+		
 		
 		if (vccx10 <= LOW_BATTERY_VOLTS_COLDx10) {
 									
@@ -962,7 +995,7 @@ int main(void)
 			
 			if ( currentSpeedStep ==0 ) {				// Special case first press turning on instantly
 								
-				updateMotor( pgm_read_word(&speedSteps[1].top) , pgm_read_word(&speedSteps[1].normailzedDuty), vccx10);		// Set new motor speed
+				updateMotor( pgm_read_word(&speedSteps[1].top) , pgm_read_word(&speedSteps[1].prescale), pgm_read_word(&speedSteps[1].normailzedDuty), vccx10);		// Set new motor speed
 
 			}
 			
@@ -1006,7 +1039,7 @@ int main(void)
 						
 		}
 			
-		updateMotor( pgm_read_word(&speedSteps[currentSpeedStep].top) , pgm_read_word(&speedSteps[currentSpeedStep].normailzedDuty), vccx10);		// Set new motor speed
+		updateMotor( pgm_read_word(&speedSteps[currentSpeedStep].top) , pgm_read_word(&speedSteps[1].prescale), pgm_read_word(&speedSteps[currentSpeedStep].normailzedDuty), vccx10);		// Set new motor speed
 				
 		if (buttonPressedFlag) {
 			
