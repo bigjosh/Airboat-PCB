@@ -665,10 +665,9 @@ uint8_t readCommand() {
 	
 int main(void)
 {
-
 	
 	initMotor();				// Initialize the motor port to drive the MOSFET low
-								// Do this 1st thing on reset so the MSOFET won't float and accidentally turn on the motor.
+								// Do this 1st thing on reset so the MOSFET won't float and accidentally turn on the motor.
 		
 	// Next, turn on the watchdog before anything else so we have the max protection. 
 									
@@ -765,8 +764,9 @@ int main(void)
 				_delay_ms(10);
 			}
 			
-						
-			setWhiteLED( PCT_TO_255(BUTTON_FEEDBACK_BRIGHTNESS_PCT) );
+			if (BUTTON_STATE_DOWN()) {												// Suppress breif flash when button released
+				setWhiteLED( PCT_TO_255(BUTTON_FEEDBACK_BRIGHTNESS_PCT) );
+			}
 			
 			// Leave the white LED on for 100 ms or until the button goes up
 			// Could do this as a single _delay_ms(100) but that might feel un-responsive
@@ -818,19 +818,7 @@ int main(void)
 		PCMSK = _BV(BUTTON_INT);				// Enable interrupt on button pin so we wake on a press
 	
 	}
-	
-	
-	// TODO: THis is a hack. Why is button INT not firing?	
-	//	PCMSK = _BV(BUTTON_INT);				// Enable interrupt on button pin so we wake on a press
-	
-	
-	/*
-	if (readVccVoltage()>=CHARGER_VOLTAGE_THRESHOLD) {			// Are we connected to charger?
-		
-	}
-	
-	*/
-	
+			
 	
 	PCMSK |= _BV(CIP_INT);	// Enable interrupt on change in state-of-charge pin no matter what
 		
@@ -843,7 +831,7 @@ int main(void)
 	
 	GIFR = _BV(PCIF);						// Clear interrupt flag so we will interrupt on any change after now...
 																		
-	if ( !CIP_STATE_ACTIVE() ) {			// Check if conditions are ALREADY true since we only wake on change....
+	if ( !CIP_STATE_ACTIVE() && !(readVccVoltage()>=CHARGER_VOLTAGE_THRESHOLD) ) {			// Check if conditions are ALREADY true since we only wake on change....
 
 			
 		// Ok, it is bedtime!
@@ -922,47 +910,50 @@ int main(void)
 				
 					brightness+=direction;
 				
-					_delay_ms(1);		// Slows the speed of the rampping LED
+					_delay_ms(1);		// Slows the speed of the ramping LED
 								
 					wdt_reset();
 				
 				}
-			
-				setWhiteLED(0);					// Turn it off now, for instant feedback if unplugged (otherwise it will be on for extra 250ms waiting for watchdog reset)
-						
-				// All done charing, reboot for good measure
-			
-				REBOOT();
+							
 			}
+			
+			setWhiteLED(0);					// Turn it off now, for instant feedback if unplugged 
+			
+			REBOOT();						// Reboot for good measure
+
+			
 		}
-		
 				
-		uint8_t vccx10 = readVccVoltage();				// Capture the current power supply voltage. This takes ~1ms and will be needed multiple times below	
+		// Here we assume that CIP will always go active whenever the charger is connected, even if the battery is full.
+		// This is empirically found to be true. This is handy because there is no good way for us to interrupt on Vcc changes.
+							
+		uint8_t vccx10 = readVccVoltage();				// Capture the current power supply voltage. This takes ~1ms and will be needed multiple times below
 		
-		if (readVccVoltage >= CHARGER_VOLTAGE_THRESHOLD )		{		// End of charge? If we are seeing a Vcc higher than the battery can produce, then we are attached to a charger. IF CIP is not active, then the battery is at end-of-charge. 
+		if ( vccx10 >= CHARGER_VOLTAGE_THRESHOLD )		{		// End of charge? If we are seeing a Vcc higher than the battery can produce, then we are attached to a charger. IF CIP is not active, then the battery is at end-of-charge.
 			
 			motorOff();						// Turn motor off in case were running before plug went in
 			
 			setWhiteLED(255);				// White LED full on
-						
+			
 			_delay_ms( JACK_DEBOUNCE_TIME_MS );
 			
 			while ( readVccVoltage() >= CHARGER_VOLTAGE_THRESHOLD ); 	// White LED on for as long as we are charging....
 			
 			// Note that this will watchdog timeout after 8 seconds and reboot us,
 			// After which we will immediately fall right back to here and continue to show the white LED
-			// This will cause a brief blink in the LED every 8 seconds, whic I think is good. 
-			
-			
-			setWhiteLED(0);					// Turn it off now, for instant feedback if unplugged (otherwise it will be on for extra 250ms waiting for watchdog reset)
+			// This will cause a brief blink in the LED every 8 seconds, which I think is good.
 			
 			// Charger unplugged, reboot for good measure
-									
-			REBOOT();
 			
+			setWhiteLED(0);					// Turn it off now, for instant feedback if unplugged						
+				
+			// All done charing, reboot for good measure
+															
+			REBOOT();
 		}
-		
-		
+	
+											
 		if (vccx10 <= LOW_BATTERY_VOLTS_COLDx10) {
 									
 			if ( (currentSpeedStep==0) || ( vccx10 <= LOW_BATTERY_VOLTS_WARMx10) ) {	// Motor off, or running and really low?
@@ -989,7 +980,7 @@ int main(void)
 		
 		if (BUTTON_STATE_DOWN())	{		// Button pushed?
 			
-			setWhiteLED( 255 );//PCT_TO_255( BUTTON_FEEDBACK_BRIGHTNESS_PCT ));		// A bit of instant user feedback
+			setWhiteLED( PCT_TO_255( BUTTON_FEEDBACK_BRIGHTNESS_PCT ));		// A bit of instant user feedback
 			
 			_delay_ms(BUTTON_DEBOUNCE_TIME_MS);			// debounce going down...
 			
