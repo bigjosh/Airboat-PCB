@@ -585,6 +585,34 @@ void motorTest() {
 	
 }
 
+// Blink a byte out the LEDs for diagnostics 
+// Starts with orange, then 8 bits High Bit first (white=1, red=0).
+// Each blink 500ms followed by 500ms off
+
+
+void blinkByte( uint8_t b ) {
+	
+	setRedLED(255);
+	setWhiteLED(255);
+	_delay_ms(500);
+	
+	uint8_t bitmask = 1<<7;
+	
+	while (bitmask) {
+		if (b & bitmask) {
+			setRedLED(0);
+			setWhiteLED(255);					
+		} else {
+			setRedLED(255);
+			setWhiteLED(0);			
+		}
+
+		_delay_ms(500);
+		bitmask >>=1;
+	}
+	
+}
+
 
 // Read a single byte from the CIP pin. 
 // This should be called immediately after the rising edge on CIP.
@@ -626,28 +654,28 @@ uint8_t readByte() {
 		if (CIP_STATE_ACTIVE()) {			// If we are high here, then it is a 1 bit
 			
 			b|=mask;
-			
-			setRedLED(0);
-			setWhiteLED(200);
-			
-			_delay_ms(100);
-			setWhiteLED(200);
-			
+						
 		} else {
-			
-			setRedLED(0);
-			setWhiteLED(20);
-			_delay_ms(100);
-			setRedLED(0);
-									
+												
 		}
 		
-		_delay_us(500);		// Put us in the middle of the trailing off phase
+//		_delay_us(500);		// Put us in the middle of the trailing off phase
+	
+		_delay_us(250);	
+		setRedLED(0);
+		setWhiteLED(0);		
+		_delay_us(250);
 		
 		if (CIP_STATE_ACTIVE()) return(0);		// Here we should be in the middle of trailing off period. If not, not good data so abort.
-							
+		
+		// Note that we do not do a wdt reset in here because no data transmission should ever take more than 8 seconds, and it is a nice safeguard to know we will reboot in case we ever get stuck. 
+		
+		mask >>=1;
+		
 	}	
 	
+	blinkByte(b);
+		
 	return( b );
 	
 }
@@ -903,6 +931,8 @@ int main(void)
 						direction=-1;
 					
 					} else if (brightness==0) {
+						
+						_delay_ms(100);				// Pause a second at off, also give the charge controller to sense the minimum current without the LED on
 				
 						direction=1;
 					
