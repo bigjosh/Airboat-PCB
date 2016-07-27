@@ -1,56 +1,57 @@
-Vibe FAB Notes
-================
-
 1. Fabrication
 
-Double side PCB, 25mm x 33mm with multiple edges, board total thickness of ~0.063",  ENIG finish.
+Double sided, 2-layer PCB. 
 
-Note that bottom side of PCB has no traces, only pads for the through holes, so the bottom paste layer is empty. 
+L-shaped as shown in outline layer.
+
+Board total thickness of 1mm,  ENIG finish.
 
 No impedance control.
 
 1oz copper, FR4 or FR1 material.
 
-Green solder mask.
+Green solder mask. Other color may be substituted. 
 
-Optional White Legend. The silk layers are provided for reference and for test boards and are not required on production boards.
+Optional White Legend specified in silk layers. Other color may be substituted, or silk layers omitted. 
 
 Minimal clearance size: 7 mils. Minimal trace width: 8 mils. 
 
 All holes plated though.
 
-There are three internal milled slots specified in the drill hits file. These should be plated though.
+The included top paste layer matches the pad sizes with no shrink or swell and should be adjusted depending on stencil type and process.
 
-The inlcuded top paste layer only includes SMD pads and does not include the bottom mounted jack and connectors. 
-
-The inlcuded top paste layer matches the pad sizes with no shrink or swell and should be adjusted depending on stencil type and process.
-
-MCP1 is an MSOP-10 package with 0.5mm pin pitch. Top mask and paste layers for this part may need to me adjusted depending on process.
+This board is intended to be broken into 2 sub-boards later. The gerber layer named "top-vgrove" contains a single linear 1mm wide v-grove 
+intended to separate the two sub-boards with the resulting dimensions of 23mm x 16mm and 4.5mm x 14mm.
 
 
 2. Assembly
 
 Reflow soldering for SMD parts.
 
-Board contains 3 though-hole components- 2 connectors and 1 jack. These though-hole parts are mounted on the back side of the board. 
+Board contains 4 sets of 2 pads each labeled BUT, MOT, BAT, and BUT2. These pads are connection points for jumper wires. 
 
+Each of the two pads on BUT will be connected to each of the two pads on BUT2 with 30mm (tip-to-tip) segments of AWG 30 insulated jumper wire. 
+Wires must be connected so that when the smaller board can be detached, rotated, and moved such that the wires are straight, parallel, and not crossing. 
+See attached wire assembly drawing for details. 
 
-3. Part orentation
+The pads on MOT and BAT will be manually soldered later. 
 
-Dot on silkscreen layer indicates the cathode direction on parts D1, D3, RED, and WHITE. 
+3. Part orientation
 
-Parts D1 and D3 are marked with a stripe on the cathode side. 
+Dot on silkscreen layer indicates pin 1 for parts Q1, D2, and M1.
 
-Photos available in the "/Orientation Photos" directory of the file package. 
+Notch on silkscreen layer indicates side for pin 1 for part U1.
+
+Parts F1, C4, R1, S1,and R3 may be oriented in any direction. 
+
+LED L1 must be placed with (1) the diffusion bubble pointed towards the closes board edge, and (2) the green dot cathode mark on the left side when
+viewed from the rear of the part. Refer to photos in the "/Orientation Photos" directory of the file package. 
 
 
 4. Firmware programming
 
-Part U1 requires firmware. The IC can be programmed directly by the distributor or onsite using a bulk programmer. The IC can also be programmed after assembly using a programming jig. 
+Part U1 requires both fuse and flash programming. 
 
-The latest release of the firmware file is available here...
+The IC can be programmed directly by the distributor or onsite using a bulk programmer. 
 
-https://github.com/bigjosh/Vibe-V2/releases
-
-Note that this version of the board *requires* firmware version 2.2.0 or higher and is not compatible with older versions! Using an older firmware version could overdrive the LEDs!
-
+The IC can also be programmed or re-programmed after assembly using an SOIC8 programming clip and USBASP programmer. More information upon request. 
