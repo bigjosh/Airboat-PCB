@@ -16,9 +16,9 @@ Optional White Legend specified in silk layers. Other color may be substituted, 
 
 Minimal clearance size: 7 mils. Minimal trace width: 8 mils. 
 
-All holes plated though.
+Vias may be tented. 
 
-The included top paste layer matches the pad sizes with no shrink or swell and should be adjusted depending on stencil type and process.
+The shrink or swell on the included paste and mask layers should be adjusted depending on stencil type and process.
 
 This board is intended to be broken into 2 sub-boards later. The gerber layer named "top-vgrove" contains a single linear 1mm wide v-grove 
 intended to separate the two sub-boards with the resulting dimensions of 23mm x 16mm and 4.5mm x 14mm.
