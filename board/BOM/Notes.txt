@@ -1,15 +1,21 @@
 The BOM file is in Digikey CSV format. 
 
+Substitutions
+=============
 None of the parts are critical.
 
 The resistors and capacitors can be substiuted for any suitable part within at least +/- 20% of value.
 
-The U1 can be substiutied with any part in the line, although changing to a 45 or 85 will require a recompile of the 
+F1 can be repalced with any suitable 0603 fuse with minium 250mA blow current. It can also be repalced with an SMD 0.0OHM JUMPER 1/10W 0603, 
+but doing so would reduce overcurrent and overvoltage protections. 
+
+U1 can be substiutied with any part in the line, although changing to a ATTINY45 or ATTINY85 will require a recompile of the 
 firmware, and changing to a different package will require changes to the footprint on the PCB.
 
-LEDs can be changed out for any part that has correct polarty and fits the pads 
+L1 can be replace with different color pair part that has correct polarty and fits the pads.
 
-The battery charger chip M1 has a variant MCP73831 that should *not* be substituted without further testing becuase it could 
-potentially cause idle power leakage. 
+M1 can be replaced with the same part in a different SOIC package, although this would require changes to the footprint on the PCB. 
+This part has a variant MCP73831 that should *not* be substituted because it could potentially increase idle power usage.
 
-
+Q1 can be replaced with any suitable N-Chan SOT23 MOSFET with the same pinout and minimum 30V/200mA. It must also have low leakage current 
+becuase any leakage will contribute to idle power usage. 
