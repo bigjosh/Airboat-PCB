@@ -453,7 +453,7 @@ static void disableLEDs() {
 
 #define LED_DIM_FACTOR 2		// Reduce LED brightness by this to compensate for missing current limiting resistor. 
 
-static void setWhiteLED( uint8_t b ) {
+static void setGreenLED( uint8_t b ) {
 	
 	if (b==0)	{	// Off
 		
@@ -493,9 +493,16 @@ static void setRedLED( uint8_t b ) {
 	
 }
 
+// Set brightness of both red and green LEDs at the same time. 0=off, 255=full on
+
+static void setOrangeLED( uint8_t b ) {
+	setGreenLED(b);
+	setRedLED(b);
+}
+
 
 void setLEDsOff() {
-	setWhiteLED(0);
+	setGreenLED(0);
 	setRedLED(0);
 }
 
@@ -593,22 +600,32 @@ void motorTest() {
 void blinkByte( uint8_t b ) {
 	
 	setRedLED(255);
-	setWhiteLED(255);
-	_delay_ms(500);
+	setGreenLED(255);
+	_delay_ms(200);
+	setGreenLED(0);
+	setRedLED(0);
+	_delay_ms(400);
 	
 	uint8_t bitmask = 1<<7;
 	
 	while (bitmask) {
+		
+		wdt_reset();
+
+		
 		if (b & bitmask) {
-			setRedLED(0);
-			setWhiteLED(255);					
+			setGreenLED(255);					
 		} else {
 			setRedLED(255);
-			setWhiteLED(0);			
 		}
 
-		_delay_ms(500);
+		_delay_ms(100);
+		setGreenLED(0);
+		setRedLED(0);
+		_delay_ms(400);
+		
 		bitmask >>=1;
+		
 	}
 	
 }
@@ -624,55 +641,45 @@ void blinkByte( uint8_t b ) {
 #define BIT_TIMEOUT_US 20000
 
 uint8_t readByte() {
-	
+		
 	uint8_t b=0;
 	uint8_t mask=1<<7;
-	
+		
+		
 	while (mask) {
 		
-		if (!CIP_STATE_ACTIVE()) {		// If we are on the first bit of a command, then we are already synced and CIP will already be active
-										// Otherwise we need to sync to it so we know exactly when to look for the data
-										
-			unsigned int countdown = 	( (F_CPU / US_PER_S ) * BIT_TIMEOUT_US  );	// Just get some basis in real time. We know that each loop pass *must* take at least 1 cycle so this establishes a bottom number of passes to have at least the TIMEOUT
+		if (!CIP_STATE_ACTIVE()) return(0);		// We must start each bit with CIP active so we can sync to the falling edge
+												
+		unsigned int countdown = 	( (F_CPU / US_PER_S ) * BIT_TIMEOUT_US  );	// Just get some basis in real time. We know that each loop pass *must* take at least 1 cycle so this establishes a bottom number of passes to have at least the TIMEOUT
 			
-			while (!CIP_STATE_ACTIVE()) {
-				countdown--;
-				if (countdown==0) {
-					return(0);							// We waited way too long for the next rising edge. 
-				}
-				
+		while (CIP_STATE_ACTIVE()) {			// NOw we wait for the falling edge to sync to
+			countdown--;
+			if (countdown==0) {
+				return(0);							// We waited way too long for the falling edge, no valid data here. 
 			}
-						
+				
 		}
-		
-		_delay_us(250);		// Put us in the middle of the high level sync part of the bit
-		
-		if (!CIP_STATE_ACTIVE()) return(0);		// If it is not high here, then we are not getting good data
-		
-		_delay_us(500);		// Put us in the middle of the data section
+				
+		_delay_us(2000);					// Put us in the middle of the level sync part of the bit
 		
 		if (CIP_STATE_ACTIVE()) {			// If we are high here, then it is a 1 bit
 			
 			b|=mask;
+			
+			// We are already high, so We can immediately start looking for the next falling sync edge
 						
 		} else {
-												
+			
+			// We are low, so we need to wait for the end of this bit so we can start the loop over back at CIP active
+			
+			_delay_us(1000);			// Put us 500us into the next sync active area. If it is not active here, then the next pass of the loop will abort.
+			
 		}
-		
-//		_delay_us(500);		// Put us in the middle of the trailing off phase
-	
-		_delay_us(250);	
-		setRedLED(0);
-		setWhiteLED(0);		
-		_delay_us(250);
-		
-		if (CIP_STATE_ACTIVE()) return(0);		// Here we should be in the middle of trailing off period. If not, not good data so abort.
-		
-		// Note that we do not do a wdt reset in here because no data transmission should ever take more than 8 seconds, and it is a nice safeguard to know we will reboot in case we ever get stuck. 
 		
 		mask >>=1;
 		
 	}	
+	
 	
 	blinkByte(b);
 		
@@ -737,13 +744,13 @@ int main(void)
 			}
 			
 			setRedLED(0);
-			setWhiteLED(255);
+			setGreenLED(255);
 			
 			for(uint8_t j=0; j<100 && !BUTTON_STATE_DOWN();j++ ) {
 				_delay_ms(1);
 			}
 			
-			setWhiteLED(0);
+			setGreenLED(0);
 					
 			wdt_reset();
 
@@ -793,7 +800,7 @@ int main(void)
 			}
 			
 			if (BUTTON_STATE_DOWN()) {												// Suppress breif flash when button released
-				setWhiteLED( PCT_TO_255(BUTTON_FEEDBACK_BRIGHTNESS_PCT) );
+				setOrangeLED( PCT_TO_255(BUTTON_FEEDBACK_BRIGHTNESS_PCT) );
 			}
 			
 			// Leave the white LED on for 100 ms or until the button goes up
@@ -804,7 +811,7 @@ int main(void)
 				_delay_ms(10);
 			}
 			
-			setWhiteLED(0);
+			setLEDsOff();
 					
 			wdt_reset();		
 			
@@ -827,9 +834,10 @@ int main(void)
 		uint8_t brightness=255;
 		
 		while(brightness--) {						
-			setWhiteLED(brightness);
+			setOrangeLED(brightness);
 			_delay_ms( 1000/255);			// Whole sequence will take about 1 sec
 		}
+		
 		
 		// We end with brightness=0 so LED is off.	
 		
@@ -907,24 +915,30 @@ int main(void)
 		// All these changes terminate the loop in a reboot. 
 		
 		// TODO: Detect difference between fully charged and charger unplugged by looking at Vcc voltage
-				
+		
+		// Here we assume that CIP will always go active whenever the charger is connected, even if the battery is full.
+		// This is empirically found to be true. This is handy because there is no good way for us to interrupt on Vcc changes.
+
 				
 		if (CIP_STATE_ACTIVE())		{		// Charging?
+						
+			// The CIP just went active, so lets see if there is data on the port...
+			// It only takes a couple ms to check, so user will not notice any delay before the charging pulse starts
 			
-			motorOff();						//Turn motor off in case were running before plug went in
+			if (!readCommand()) {			
+												
+				// If not, then we are just charging....
 			
-			// Check for an incoming serial command on the charger port
-			
-			if (!readCommand()) {			// If it was not a valid command, then we are charging...
-													
+				motorOff();						//Turn motor off in case were running before plug went in
+
+				_delay_ms( JACK_DEBOUNCE_TIME_MS );		// Probably not need because the filed readCommand would have taken long enough...
+																
 				uint8_t brightness=0;
 				int8_t direction=1;
-			
-				_delay_ms( JACK_DEBOUNCE_TIME_MS );
-						
+																
 				while (CIP_STATE_ACTIVE())	{	// White LED pulse for as long as we are charging....
 				
-					setWhiteLED(brightness);
+					setGreenLED(brightness);
 				
 					if (brightness==255) {
 					
@@ -945,18 +959,14 @@ int main(void)
 					wdt_reset();
 				
 				}
-							
+											
+				setGreenLED(0);					// Turn it off now, for instant feedback if unplugged 
+			
+				REBOOT();						// Reboot for good measure
 			}
-			
-			setWhiteLED(0);					// Turn it off now, for instant feedback if unplugged 
-			
-			REBOOT();						// Reboot for good measure
-
-			
+				
 		}
 				
-		// Here we assume that CIP will always go active whenever the charger is connected, even if the battery is full.
-		// This is empirically found to be true. This is handy because there is no good way for us to interrupt on Vcc changes.
 							
 		uint8_t vccx10 = readVccVoltage();				// Capture the current power supply voltage. This takes ~1ms and will be needed multiple times below
 		
@@ -964,11 +974,11 @@ int main(void)
 			
 			motorOff();						// Turn motor off in case were running before plug went in
 			
-			setWhiteLED(255);				// White LED full on
+			setGreenLED(255);				// White LED full on
 			
 			_delay_ms( JACK_DEBOUNCE_TIME_MS );
 			
-			while ( readVccVoltage() >= CHARGER_VOLTAGE_THRESHOLD ); 	// White LED on for as long as we are charging....
+			while ( readVccVoltage() >= CHARGER_VOLTAGE_THRESHOLD  ); 	// White LED on for as long as we are charging....
 			
 			// Note that this will watchdog timeout after 8 seconds and reboot us,
 			// After which we will immediately fall right back to here and continue to show the white LED
@@ -976,7 +986,7 @@ int main(void)
 			
 			// Charger unplugged, reboot for good measure
 			
-			setWhiteLED(0);					// Turn it off now, for instant feedback if unplugged						
+			setGreenLED(0);					// Turn it off now, for instant feedback if unplugged						
 				
 			// All done charing, reboot for good measure
 															
@@ -990,7 +1000,7 @@ int main(void)
 			
 				motorOff();
 											
-				setWhiteLED(0);									// Needed because both LEDs might be on if we are in the middle of a button press
+				setGreenLED(0);									// Needed because both LEDs might be on if we are in the middle of a button press
 			
 				setRedLED(255);
 			
@@ -1010,7 +1020,7 @@ int main(void)
 		
 		if (BUTTON_STATE_DOWN())	{		// Button pushed?
 			
-			setWhiteLED( PCT_TO_255( BUTTON_FEEDBACK_BRIGHTNESS_PCT ));		// A bit of instant user feedback
+			setOrangeLED( PCT_TO_255( BUTTON_FEEDBACK_BRIGHTNESS_PCT ));		// A bit of instant user feedback (orange)
 			
 			_delay_ms(BUTTON_DEBOUNCE_TIME_MS);			// debounce going down...
 			
@@ -1031,7 +1041,7 @@ int main(void)
 					
 					motorOff();
 										
-					setWhiteLED(0);
+					setLEDsOff(0);
 					
 					REBOOT();
 					
@@ -1064,10 +1074,10 @@ int main(void)
 				
 		if (buttonPressedFlag) {
 			
-			// Button released, white LED off again
+			// Button released, LEDs off again
 			
-			setWhiteLED(0);
-						
+			setLEDsOff();
+									
 			_delay_ms(BUTTON_DEBOUNCE_TIME_MS);		// debounce the button returning back up
 			
 			
