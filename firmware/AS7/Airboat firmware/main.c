@@ -497,7 +497,7 @@ static void setRedLED( uint8_t b ) {
 
 static void setOrangeLED( uint8_t b ) {
 	setGreenLED(b);
-	setRedLED(b);
+	setRedLED(b/2);		// A bit of color correctio since the red seems brighter
 }
 
 
