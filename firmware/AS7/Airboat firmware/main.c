@@ -42,9 +42,10 @@
 // This is the default fuse setting and works fine for PWM frequencies up to about 10Khz (1% lowest duty), or 100KHz (10% lowest duty). 
 // This suits the current speed settings, but a high clock might be needed for higher PWM frequencies
 
-#define F_CPU 128000						// Name used by delay.h 
+#define F_CPU 128000						// Name used by delay.h		
+											// Note that there is a hardcoded delay look in readbyte() that needs to be adjusted if this changes!
 
-#define CYCLES_PER_S F_CPU					// Better name
+#define CYCLES_PER_S F_CPU					// Better name									
 
 #define CYCLES_PER_MS (F_CPU/1000UL)		// More convenient unit
 
@@ -599,11 +600,14 @@ void motorTest() {
 
 void blinkByte( uint8_t b ) {
 	
-	setRedLED(255);
-	setGreenLED(255);
-	_delay_ms(200);
-	setGreenLED(0);
-	setRedLED(0);
+	setOrangeLED(255);
+	_delay_ms(400);
+	
+	for(uint8_t x=255;x>0;x--) {
+		setOrangeLED(x);
+		_delay_ms(1);
+	}
+	
 	_delay_ms(400);
 	
 	uint8_t bitmask = 1<<7;
@@ -630,6 +634,17 @@ void blinkByte( uint8_t b ) {
 	
 }
 
+// Pulls button low for one cycle, just for diagnostics...
+
+void blinkButton(void) {		
+	BUTTON_PORT &= ~_BV( BUTTON_BIT );		// Turn pull up off
+	BUTTON_DDR |= _BV( BUTTON_BIT );		// Pull active low. Safe beucase the butotn only connects to ground
+	_delay_us(1);
+	BUTTON_DDR &= ~_BV(BUTTON_BIT);
+	BUTTON_PORT |= _BV( BUTTON_BIT );		// Turn pull up on
+	
+}
+
 
 // Read a single byte from the CIP pin. 
 // This should be called immediately after the rising edge on CIP.
@@ -640,6 +655,7 @@ void blinkByte( uint8_t b ) {
 
 #define BIT_TIMEOUT_US 20000
 
+
 uint8_t readByte() {
 		
 	uint8_t b=0;
@@ -649,32 +665,43 @@ uint8_t readByte() {
 	while (mask) {
 		
 		if (!CIP_STATE_ACTIVE()) return(0);		// We must start each bit with CIP active so we can sync to the falling edge
-												
-		unsigned int countdown = 	( (F_CPU / US_PER_S ) * BIT_TIMEOUT_US  );	// Just get some basis in real time. We know that each loop pass *must* take at least 1 cycle so this establishes a bottom number of passes to have at least the TIMEOUT
-			
-		while (CIP_STATE_ACTIVE()) {			// NOw we wait for the falling edge to sync to
-			countdown--;
-			if (countdown==0) {
-				return(0);							// We waited way too long for the falling edge, no valid data here. 
-			}
-				
-		}
-				
-		_delay_us(2000);					// Put us in the middle of the level sync part of the bit
+																
+		uint8_t countdown = 255;				// This ends up being about the right timeout aprox 16ms. You would actually never want to wait that long because if the battery was full the CIP might not stay active that long. 
 		
-		if (CIP_STATE_ACTIVE()) {			// If we are high here, then it is a 1 bit
+		//( (F_CPU / US_PER_S ) * BIT_TIMEOUT_US  );	// Just get some basis in real time. We know that each loop pass *must* take at least 1 cycle so this establishes a bottom number of passes to have at least the TIMEOUT
+			
+		blinkButton();			
+		while (CIP_STATE_ACTIVE()  && (--countdown));  		// Now we wait for the falling edge to sync to
+		blinkButton();
+															// We don't want to wait too long because the user is not seeing the CIP LED indication, and the motor is still running															
+		_delay_us(2000);					// Put us in the middle of the level sync part of the bit						
+		
+		uint8_t cip_snapshot = CIP_STATE_ACTIVE();			// Grab a snapshot of the CIP level as close to target timing as possible 
+		
+		// Now that we have the snap at the right moment, we can check to see if we even care and abort of not...
+		
+		if (countdown==0) {
+			return(0);										// We timed out waiting for the falling edge, no valid data here.
+		}
+			
+				
+		if (cip_snapshot) {			// If we are high here, then it is a 1 bit
+			
 			
 			b|=mask;
 			
 			// We are already high, so We can immediately start looking for the next falling sync edge
 						
 		} else {
+
 			
 			// We are low, so we need to wait for the end of this bit so we can start the loop over back at CIP active
 			
-			_delay_us(1000);			// Put us 500us into the next sync active area. If it is not active here, then the next pass of the loop will abort.
+			_delay_us(2000);			// Put us 500us into the next sync active area. If it is not active here, then the next pass of the loop will abort.
 			
 		}
+		
+		
 		
 		mask >>=1;
 		
