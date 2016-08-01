@@ -697,8 +697,10 @@ void blinkButton(void) {
 	uint8_t readCommand() {
 		
 	uint16_t b=0;
+	
 	uint16_t mask=1U<<15;
 	
+	uint8_t partiy = 0;
 				
 	while (mask) {
 
@@ -725,6 +727,8 @@ void blinkButton(void) {
 						
 			b|=mask;
 			
+			partiy ^= 0x01;			// Keep track of bit parity for error checking
+			
 			// We are already high, so We can immediately start looking for the next falling sync edge
 						
 		} else {
@@ -739,7 +743,36 @@ void blinkButton(void) {
 					
 		mask >>=1;
 		
-	}	
+	}
+	
+	
+	// Commands:
+	// duty: 001 xxxx dddddddd p
+	// freq: 010 ssss tttttttt p
+	//
+	//  p = partity (all bits add up to 0)
+	//  t = top
+	//  s = prescaler
+	//  x = don't care
+
+	if (partiy == 0 )	{
+		
+		uint8_t a =  ( b >> 9 ) & 0b00011111;
+		uint8_t b =  ( b >> 1 ) & 0b11111111;
+					
+		switch ( b & 0b1110000000000000 ) {
+		
+			case 0b0010000000000000: {
+			
+			
+			}
+			break;
+		
+		}
+		
+	} else {	// Parity error
+		
+	}
 	
 	blinkButton();
 		
@@ -908,6 +941,8 @@ int main(void)
 		// Since the interrupt is not enabled, the pin will be disconnected during sleep so any floating
 		// on it will not waste power.
 	
+		setSpeedStepDefaults();		// Use lockout mode to reset the speed steps to defaults
+	
 	} else {
 	
 		// Leave pull-up enabled
@@ -935,9 +970,6 @@ int main(void)
 			
 		// Ok, it is bedtime!
 		
-		//disableLEDs();					// Turn off timer since we don't need LEDs while sleeping and timer will use power
-											// TODO: I think shutodnw mode kills the timers. Check and make sure!
-												
 		set_sleep_mode( SLEEP_MODE_PWR_DOWN );  // Go into deep sleep where only a pin change can wake us.. uses only ~0.1uA!
 					
 		// GOOD NIGHT!		

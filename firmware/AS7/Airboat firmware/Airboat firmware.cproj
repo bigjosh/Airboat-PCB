@@ -53,11 +53,11 @@
       <ToolName>AVR Dragon</ToolName>
     </com_atmel_avrdbg_tool_avrdragon>
     <avrtoolinterface>ISP</avrtoolinterface>
-    <avrtoolinterfaceclock>10000</avrtoolinterfaceclock>
+    <avrtoolinterfaceclock>25000</avrtoolinterfaceclock>
     <com_atmel_avrdbg_tool_stk600>
       <ToolOptions>
         <InterfaceProperties>
-          <IspClock>10000</IspClock>
+          <IspClock>25000</IspClock>
         </InterfaceProperties>
         <InterfaceName>ISP</InterfaceName>
       </ToolOptions>
