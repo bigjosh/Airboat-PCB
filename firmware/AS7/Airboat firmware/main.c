@@ -385,14 +385,44 @@ typedef struct {
 
 #define SPEED_STEP_COUNT 4
 
-const speedStepStruct speedSteps[SPEED_STEP_COUNT] PROGMEM = {
+// We keep these in RAM so they can be modified.
+// The noinit makes it not get overwritten on every reboot (we set it up to defaults on first boot).
+// Really should go in eeprom, but too much complexity for now...
+
+static speedStepStruct speedSteps[SPEED_STEP_COUNT] __attribute__ ((section (".noinit")));
+
+void setSpeedStep( uint8_t step , uint8_t top , uint8_t prescale, uint8_t normalizedDuty ) {
+	speedSteps[step].top=top;
+	speedSteps[step].prescale=prescale;
+	speedSteps[step].normailzedDuty=normalizedDuty;
+}
+
+
+void updateMotorToStep( uint8_t step , uint8_t vccx10 ) {
+	
+		updateMotor( speedSteps[step].top , speedSteps[step].prescale , speedSteps[step].normailzedDuty, vccx10);		// Set new motor speed
+	
+}
+
+
+
+const speedStepStruct speedStepDefaults[SPEED_STEP_COUNT] PROGMEM = {
 	
 	{          0,    0 , 1 },			// step 0 = off
-	{		  30,  255 , 1 },
+	{		  10,  255 , 1 },
 	{	      50,  255 , 1 },
 	{	      80,  255 , 1 },
 	
 };
+
+
+
+void setSpeedStepDefaults(void) {
+	
+	for(uint8_t step=0; step<SPEED_STEP_COUNT;step++) {
+		setSpeedStep( step, pgm_read_word(&speedStepDefaults[step].top) , pgm_read_word(&speedStepDefaults[step].prescale), pgm_read_word(&speedStepDefaults[step].normailzedDuty) );
+	}
+}
 
 
 // We use Timer0 for timing functions and also PWMing the LEDs
@@ -646,17 +676,25 @@ void blinkButton(void) {
 	
 }
 
+#define CALIBRATION
 
-// Read a 16 bit word from the power jack
-// Assumes CIP is already active.
-// Will wait for terminating bit to avoid charging false-alarm on return. 
-// Returns 0 on bad data or timeout. 
+#ifdef CALIBRATION 
+
+	// Read a serial command from the CIP pin. Protocol described here...
+	// https://github.com/bigjosh/Airboat-PCB/tree/master/Calibration-Controller
+	// This should be called immediately after the rising edge on CIP...
 
 
-// The timing values are hard coded because they are tightly constrained by hardware limits. More info here...
+	// Read a 16 bit word from the power jack
+	// Assumes CIP is already active.
+	// Will wait for terminating bit to avoid charging false-alarm on return. 
+	// Returns 0 on bad data or timeout. 
 
 
-uint8_t readCommand() {
+	// The timing values are hard coded because they are tightly constrained by hardware limits. More info here...
+
+
+	uint8_t readCommand() {
 		
 	uint16_t b=0;
 	uint16_t mask=1U<<15;
@@ -702,21 +740,20 @@ uint8_t readCommand() {
 		mask >>=1;
 		
 	}	
+	
+	blinkButton();
 		
-	while( readVccVoltage()>=CHARGER_VOLTAGE_THRESHOLD );		// We have to consume the capacitor discharge after the data or else we might see it as a charger on the next pass
-																// It is up to the transmitter to timely turn off power at the end of a packet .
-																// This will eventually end in a watchdog timeout.
-
+	while( CIP_STATE_ACTIVE() );		// We have to consume the capacitor discharge after the data or else we might see it as a charger on the next pass
+										// It is up to the transmitter to timely turn off power at the end of a packet .
+										// This will eventually end in a watchdog timeout.
 	
 	return( 1 );			// Success!
 	
-}
+	}
 
-// Read a serial command from the CIP pin. Protocol described here...
-// https://github.com/bigjosh/Airboat-PCB/tree/master/Calibration-Controller
-// This should be called immediately after the rising edge on CIP...
+#endif
 
-
+#define CALIBRATION 1
 	
 int main(void)
 {
@@ -753,7 +790,6 @@ int main(void)
 				
 		// Blink back and forth to show LEDs work and solicit a button press	
 		
-		//enableLEDs();			// Turn on PWM timer
 					
 		for(uint8_t i=0;i<100 && !BUTTON_STATE_DOWN(); i++ ) {
 			
@@ -777,6 +813,11 @@ int main(void)
 		}
 				
 		_delay_ms(BUTTON_DEBOUNCE_TIME_MS);
+		
+		
+		// Set up the initial values for the speedSteps
+		
+		setSpeedStepDefaults();
 		
 								
 		// TODO: Put more code here for some testing and feedback on initial battery connection at the factory.
@@ -928,71 +969,80 @@ int main(void)
 	// Motor speed
 	
 	uint8_t currentSpeedStep = 0;				// What motor speed setting are we currently on?
-			
+				
 	while (1)	{	
 				
 		// This main loop runs for as long as the motor is on. 
 		// It can be terminated by battery charger change of state, low battery detection, button press back to 0 speed, or long button press
 		// All these changes terminate the loop in a reboot. 
-		
+
 		uint8_t vccx10 = readVccVoltage();		// Snapshot of current voltage level
 				
-		if ( vccx10 >= CHARGER_VOLTAGE_THRESHOLD ) {			// We are either getting data or a charger is connected
+		#ifdef CALIBRATION
+		
+			// In calibration mode, we receive commands though the power jack so all charging functions are suppressed. 
+			readCommand();
+		
+		#else
+		
+				
+			if ( vccx10 >= CHARGER_VOLTAGE_THRESHOLD ) {			// We are either getting data or a charger is connected
 												
-			motorOff();								// Always turn off motor when charger connected
+				motorOff();								// Always turn off motor when charger connected
 
-			_delay_ms( JACK_DEBOUNCE_TIME_MS );		// We might see bouncing as an energized plug is seated in the jack.
-													// This just prevents unnecessary blinking of the LED from us rebooting because we thought charging is over when it is Really just a bounce.
-													// Probably not need because the filed readCommand would have taken long enough...
+				_delay_ms( JACK_DEBOUNCE_TIME_MS );		// We might see bouncing as an energized plug is seated in the jack.
+														// This just prevents unnecessary blinking of the LED from us rebooting because we thought charging is over when it is Really just a bounce.
+														// Probably not need because the filed readCommand would have taken long enough...
 																															
 			
-			uint8_t brightness=0;
-			int8_t direction=1;
+				uint8_t brightness=0;
+				int8_t direction=1;
 								
 			
-			while (  CIP_STATE_ACTIVE() || (readVccVoltage()>=CHARGER_VOLTAGE_THRESHOLD))	{	// Stay here as long as the plug is in. Order is important here because reading the voltage from the ADC takes a few ms
+				while (  CIP_STATE_ACTIVE() || (readVccVoltage()>=CHARGER_VOLTAGE_THRESHOLD))	{	// Stay here as long as the plug is in. Order is important here because reading the voltage from the ADC takes a few ms
 				
-				// This is slightly complex because we can transition back and forth from CIP to EOC asynchronously, when say either the battery becomes full
-				// or when the charger has been sitting connected for long enough that the battery self depletes low enough to trigger a top-off (unlikely)
+					// This is slightly complex because we can transition back and forth from CIP to EOC asynchronously, when say either the battery becomes full
+					// or when the charger has been sitting connected for long enough that the battery self depletes low enough to trigger a top-off (unlikely)
 				
-				// We could just let this fall though after each of those transitions, but the tie it takes to reboot would make the LED blink a little and thats ugly.
+					// We could just let this fall though after each of those transitions, but the tie it takes to reboot would make the LED blink a little and thats ugly.
 				
 				
-				// The effect of the slightly convoluted code below is is make the transitions between CIP and EOC smooth. The little things count - even if no one notices!
-				// When CIP is active, the LED will smoothly ramp up and down and up and down.
-				// When CIP is not active, the current ramp will continue in the current direction, but once it rises to max value it will stay there as long as !CIP
+					// The effect of the slightly convoluted code below is is make the transitions between CIP and EOC smooth. The little things count - even if no one notices!
+					// When CIP is active, the LED will smoothly ramp up and down and up and down.
+					// When CIP is not active, the current ramp will continue in the current direction, but once it rises to max value it will stay there as long as !CIP
 				
-				setGreenLED(brightness);
+					setGreenLED(brightness);
 				
-				if (brightness==0) {
+					if (brightness==0) {
 					
-					direction=1;
-					//_delay_ms(100);			// Pause for a second at off because it looks nice and gives the charger IC a moment to see the current drain without any LED load.
+						direction=1;
+						//_delay_ms(100);			// Pause for a second at off because it looks nice and gives the charger IC a moment to see the current drain without any LED load.
 					
-					} else if (brightness==255) {
+						} else if (brightness==255) {
 					
-					if (!CIP_STATE_ACTIVE()) {		// If !CIP, then we are at EOC so smoothly get to full on and then stay there
-						direction=0;
-						} else {
-						direction=-1;
+						if (!CIP_STATE_ACTIVE()) {		// If !CIP, then we are at EOC so smoothly get to full on and then stay there
+							direction=0;
+							} else {
+							direction=-1;
+						}
+					
 					}
-					
+				
+					brightness += direction;
+				
+					_delay_ms(1);		// Slows the speed of the ramping LED
+				
+					wdt_reset();
+				
 				}
-				
-				brightness += direction;
-				
-				_delay_ms(1);		// Slows the speed of the ramping LED
-				
-				wdt_reset();
-				
-			}
 			
-			setGreenLED(0);					// Turn it off now, for instant feedback if unplugged
+				setGreenLED(0);					// Turn it off now, for instant feedback if unplugged
 
-			REBOOT();						// Reboot for good measure. Note that this is the ONLY way out once we have detected CIP or high voltage (without valid data),
+				REBOOT();						// Reboot for good measure. Note that this is the ONLY way out once we have detected CIP or high voltage (without valid data),
 														
-		}	
-			
+			}	
+		
+		#endif
 										
 		// Check if battery is too low for operation. 
 		// Cold voltage is higher than warm because the motor being on pulls down the battery. This also give a bit of hysteresis when turning the unit back on after the motor drain made it turn off. 
@@ -1027,7 +1077,7 @@ int main(void)
 			
 			if ( currentSpeedStep ==0 ) {				// Special case first press turning on instantly
 								
-				updateMotor( pgm_read_word(&speedSteps[1].top) , pgm_read_word(&speedSteps[1].prescale), pgm_read_word(&speedSteps[1].normailzedDuty), vccx10);		// Set new motor speed
+				updateMotorToStep( 1 , vccx10);		// Set new motor speed
 
 			}
 			
@@ -1071,7 +1121,7 @@ int main(void)
 						
 		}
 			
-		updateMotor( pgm_read_word(&speedSteps[currentSpeedStep].top) , pgm_read_word(&speedSteps[1].prescale), pgm_read_word(&speedSteps[currentSpeedStep].normailzedDuty), vccx10);		// Set new motor speed
+		updateMotorToStep(currentSpeedStep , vccx10);		// Set new motor speed 
 				
 		if (buttonPressedFlag) {
 			
