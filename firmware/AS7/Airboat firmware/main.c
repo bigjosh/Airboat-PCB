@@ -44,6 +44,7 @@
 
 #define F_CPU 128000						// Name used by delay.h		
 											// Note that there is a hardcoded delay look in readbyte() that needs to be adjusted if this changes!
+											// The ADC prescaler in readVccVoltage(0 also depends on the system clock.
 
 #define CYCLES_PER_S F_CPU					// Better name									
 
@@ -259,9 +260,9 @@ static uint8_t readVccVoltage(void) {
 	kHz and 200 kHz to get maximum resolution.
 	*/	
 				
-	// Enable ADC, set pre-scaller to /8 which will give a ADC clock of 1mHz/8 = 125kHz. 
+	// Enable ADC, no prescaler so we will run ADC at 125kHz. 
 	
-	ADCSRA = _BV(ADEN) | _BV(ADPS1) | _BV(ADPS0);
+	ADCSRA = _BV(ADEN);
 
 
 	// Select ADC inputs
@@ -498,7 +499,7 @@ static void setRedLED( uint8_t b ) {
 
 static void setOrangeLED( uint8_t b ) {
 	setGreenLED(b);
-	setRedLED(b/2);		// A bit of color correctio since the red seems brighter
+	setRedLED(b/3);		// A bit of color correction since the red LED is brighter
 }
 
 
@@ -639,55 +640,51 @@ void blinkByte( uint8_t b ) {
 void blinkButton(void) {		
 	BUTTON_PORT &= ~_BV( BUTTON_BIT );		// Turn pull up off
 	BUTTON_DDR |= _BV( BUTTON_BIT );		// Pull active low. Safe beucase the butotn only connects to ground
-	_delay_us(1);
+	_delay_us(10);
 	BUTTON_DDR &= ~_BV(BUTTON_BIT);
 	BUTTON_PORT |= _BV( BUTTON_BIT );		// Turn pull up on
 	
 }
 
 
-// Read a single byte from the CIP pin. 
-// This should be called immediately after the rising edge on CIP.
-// Returns 0 on bad data. 
+// Read a 16 bit word from the power jack
+// Assumes CIP is already active.
+// Will wait for terminating bit to avoid charging false-alarm on return. 
+// Returns 0 on bad data or timeout. 
+
 
 // The timing values are hard coded because they are tightly constrained by hardware limits. More info here...
-//
-
-#define BIT_TIMEOUT_US 20000
 
 
-uint8_t readByte() {
+uint8_t readCommand() {
 		
-	uint8_t b=0;
-	uint8_t mask=1<<7;
-		
-		
+	uint16_t b=0;
+	uint16_t mask=1U<<15;
+	
+				
 	while (mask) {
-		
+
 		if (!CIP_STATE_ACTIVE()) return(0);		// We must start each bit with CIP active so we can sync to the falling edge
 																
-		uint8_t countdown = 255;				// This ends up being about the right timeout aprox 16ms. You would actually never want to wait that long because if the battery was full the CIP might not stay active that long. 
+		uint8_t countdown = 255;				// This ends up being about the right timeout aprox 16ms at 128Khz. You would actually never want to wait that long because if the battery was full the CIP might not stay active that long. 
+												// Note this needs to be adjusted if F_CPU changes!!!
 		
-		//( (F_CPU / US_PER_S ) * BIT_TIMEOUT_US  );	// Just get some basis in real time. We know that each loop pass *must* take at least 1 cycle so this establishes a bottom number of passes to have at least the TIMEOUT
-			
-		blinkButton();			
 		while (CIP_STATE_ACTIVE()  && (--countdown));  		// Now we wait for the falling edge to sync to
-		blinkButton();
-															// We don't want to wait too long because the user is not seeing the CIP LED indication, and the motor is still running															
-		_delay_us(2000);					// Put us in the middle of the level sync part of the bit						
+															// We don't want to wait too long because the user is not seeing the CIP LED indication, and the motor is still running																														
+															
+		_delay_us(3000);						// Put us in the middle of the data bit window. This gives time for the CIP to react to the change in input voltage, which empirically can take 1ms, plus a 1ms sample window. 				
 		
-		uint8_t cip_snapshot = CIP_STATE_ACTIVE();			// Grab a snapshot of the CIP level as close to target timing as possible 
-		
+		uint8_t cip_snapshot = CIP_STATE_ACTIVE();			// Grab a snapshot of the CIP level as close to sample target as possible. 
+							
 		// Now that we have the snap at the right moment, we can check to see if we even care and abort of not...
 		
 		if (countdown==0) {
-			return(0);										// We timed out waiting for the falling edge, no valid data here.
+			return(0);										// We timed out waiting for the falling edge, no valid data here. We be charging!
 		}
 			
 				
 		if (cip_snapshot) {			// If we are high here, then it is a 1 bit
-			
-			
+						
 			b|=mask;
 			
 			// We are already high, so We can immediately start looking for the next falling sync edge
@@ -697,20 +694,21 @@ uint8_t readByte() {
 			
 			// We are low, so we need to wait for the end of this bit so we can start the loop over back at CIP active
 			
-			_delay_us(2000);			// Put us 500us into the next sync active area. If it is not active here, then the next pass of the loop will abort.
+			_delay_us(3000);			// Put us 500us into the next sync active area. If it is not active here, then the next pass of the loop will abort.
 			
 		}
 		
-		
-		
+					
 		mask >>=1;
 		
 	}	
-	
-	
-	blinkByte(b);
 		
-	return( b );
+	while( readVccVoltage()>=CHARGER_VOLTAGE_THRESHOLD );		// We have to consume the capacitor discharge after the data or else we might see it as a charger on the next pass
+																// It is up to the transmitter to timely turn off power at the end of a packet .
+																// This will eventually end in a watchdog timeout.
+
+	
+	return( 1 );			// Success!
 	
 }
 
@@ -718,12 +716,7 @@ uint8_t readByte() {
 // https://github.com/bigjosh/Airboat-PCB/tree/master/Calibration-Controller
 // This should be called immediately after the rising edge on CIP...
 
-uint8_t readCommand() {
-	
-	return(readByte());
-	
-	
-}
+
 	
 int main(void)
 {
@@ -893,9 +886,11 @@ int main(void)
 	// is that we get woken up an extra time and go back to sleep.	
 	
 	GIFR = _BV(PCIF);						// Clear interrupt flag so we will interrupt on any change after now...
+	
+	// Note that here we assume that CIP will always go active and wake us whenever the charger is connected, even if the battery is full.
+	// This is empirically found to be true. This is handy because there is no good way for us to interrupt on Vcc changes.	
 																		
 	if ( !CIP_STATE_ACTIVE() && !(readVccVoltage()>=CHARGER_VOLTAGE_THRESHOLD) ) {			// Check if conditions are ALREADY true since we only wake on change....
-
 			
 		// Ok, it is bedtime!
 		
@@ -934,112 +929,91 @@ int main(void)
 	
 	uint8_t currentSpeedStep = 0;				// What motor speed setting are we currently on?
 			
-	while (1)	{		
-		
-		
+	while (1)	{	
+				
 		// This main loop runs for as long as the motor is on. 
 		// It can be terminated by battery charger change of state, low battery detection, button press back to 0 speed, or long button press
 		// All these changes terminate the loop in a reboot. 
 		
-		// TODO: Detect difference between fully charged and charger unplugged by looking at Vcc voltage
-		
-		// Here we assume that CIP will always go active whenever the charger is connected, even if the battery is full.
-		// This is empirically found to be true. This is handy because there is no good way for us to interrupt on Vcc changes.
-
+		uint8_t vccx10 = readVccVoltage();		// Snapshot of current voltage level
 				
-		if (CIP_STATE_ACTIVE())		{		// Charging?
-						
-			// The CIP just went active, so lets see if there is data on the port...
-			// It only takes a couple ms to check, so user will not notice any delay before the charging pulse starts
-			
-			if (!readCommand()) {			
+		if ( vccx10 >= CHARGER_VOLTAGE_THRESHOLD ) {			// We are either getting data or a charger is connected
 												
-				// If not, then we are just charging....
-			
-				motorOff();						//Turn motor off in case were running before plug went in
+			motorOff();								// Always turn off motor when charger connected
 
-				_delay_ms( JACK_DEBOUNCE_TIME_MS );		// Probably not need because the filed readCommand would have taken long enough...
-																
-				uint8_t brightness=0;
-				int8_t direction=1;
-																
-				while (CIP_STATE_ACTIVE())	{	// White LED pulse for as long as we are charging....
-				
-					setGreenLED(brightness);
-				
-					if (brightness==255) {
-					
-						direction=-1;
-					
-					} else if (brightness==0) {
-						
-						_delay_ms(100);				// Pause a second at off, also give the charge controller to sense the minimum current without the LED on
-				
-						direction=1;
-					
-					}
-				
-					brightness+=direction;
-				
-					_delay_ms(1);		// Slows the speed of the ramping LED
+			_delay_ms( JACK_DEBOUNCE_TIME_MS );		// We might see bouncing as an energized plug is seated in the jack.
+													// This just prevents unnecessary blinking of the LED from us rebooting because we thought charging is over when it is Really just a bounce.
+													// Probably not need because the filed readCommand would have taken long enough...
+																															
+			
+			uint8_t brightness=0;
+			int8_t direction=1;
 								
-					wdt_reset();
+			
+			while (  CIP_STATE_ACTIVE() || (readVccVoltage()>=CHARGER_VOLTAGE_THRESHOLD))	{	// Stay here as long as the plug is in. Order is important here because reading the voltage from the ADC takes a few ms
 				
+				// This is slightly complex because we can transition back and forth from CIP to EOC asynchronously, when say either the battery becomes full
+				// or when the charger has been sitting connected for long enough that the battery self depletes low enough to trigger a top-off (unlikely)
+				
+				// We could just let this fall though after each of those transitions, but the tie it takes to reboot would make the LED blink a little and thats ugly.
+				
+				
+				// The effect of the slightly convoluted code below is is make the transitions between CIP and EOC smooth. The little things count - even if no one notices!
+				// When CIP is active, the LED will smoothly ramp up and down and up and down.
+				// When CIP is not active, the current ramp will continue in the current direction, but once it rises to max value it will stay there as long as !CIP
+				
+				setGreenLED(brightness);
+				
+				if (brightness==0) {
+					
+					direction=1;
+					//_delay_ms(100);			// Pause for a second at off because it looks nice and gives the charger IC a moment to see the current drain without any LED load.
+					
+					} else if (brightness==255) {
+					
+					if (!CIP_STATE_ACTIVE()) {		// If !CIP, then we are at EOC so smoothly get to full on and then stay there
+						direction=0;
+						} else {
+						direction=-1;
+					}
+					
 				}
-											
-				setGreenLED(0);					// Turn it off now, for instant feedback if unplugged 
-			
-				REBOOT();						// Reboot for good measure
+				
+				brightness += direction;
+				
+				_delay_ms(1);		// Slows the speed of the ramping LED
+				
+				wdt_reset();
+				
 			}
-				
-		}
-				
-							
-		uint8_t vccx10 = readVccVoltage();				// Capture the current power supply voltage. This takes ~1ms and will be needed multiple times below
+			
+			setGreenLED(0);					// Turn it off now, for instant feedback if unplugged
+
+			REBOOT();						// Reboot for good measure. Note that this is the ONLY way out once we have detected CIP or high voltage (without valid data),
+														
+		}	
+			
+										
+		// Check if battery is too low for operation. 
+		// Cold voltage is higher than warm because the motor being on pulls down the battery. This also give a bit of hysteresis when turning the unit back on after the motor drain made it turn off. 
 		
-		if ( vccx10 >= CHARGER_VOLTAGE_THRESHOLD )		{		// End of charge? If we are seeing a Vcc higher than the battery can produce, then we are attached to a charger. IF CIP is not active, then the battery is at end-of-charge.
-			
-			motorOff();						// Turn motor off in case were running before plug went in
-			
-			setGreenLED(255);				// White LED full on
-			
-			_delay_ms( JACK_DEBOUNCE_TIME_MS );
-			
-			while ( readVccVoltage() >= CHARGER_VOLTAGE_THRESHOLD  ); 	// White LED on for as long as we are charging....
-			
-			// Note that this will watchdog timeout after 8 seconds and reboot us,
-			// After which we will immediately fall right back to here and continue to show the white LED
-			// This will cause a brief blink in the LED every 8 seconds, which I think is good.
-			
-			// Charger unplugged, reboot for good measure
-			
-			setGreenLED(0);					// Turn it off now, for instant feedback if unplugged						
-				
-			// All done charing, reboot for good measure
-															
-			REBOOT();
-		}
-	
-											
-		if (vccx10 <= LOW_BATTERY_VOLTS_COLDx10) {
+													
+		if ( ( ( vccx10 <= LOW_BATTERY_VOLTS_COLDx10) && (currentSpeedStep==0)) ||  ( vccx10 <= LOW_BATTERY_VOLTS_WARMx10)  ) {
 									
-			if ( (currentSpeedStep==0) || ( vccx10 <= LOW_BATTERY_VOLTS_WARMx10) ) {	// Motor off, or running and really low?
-			
-				motorOff();
+			motorOff();
 											
-				setGreenLED(0);									// Needed because both LEDs might be on if we are in the middle of a button press
+			setGreenLED(0);									// Needed because both LEDs might be on if we are in the middle of a button press
 			
-				setRedLED(255);
+			setRedLED(255);
 			
-				_delay_ms(LOW_BATTERY_LED_ONTIME_MS);			// Show red LED to user to show low battery
+			_delay_ms(LOW_BATTERY_LED_ONTIME_MS);			// Show red LED to user to show low battery
 				
-				while (BUTTON_STATE_DOWN());					// Wait for button to be released if pressed
-																// Will watchdog timeout in 8 seconds if stuck, and then stuck button defense will take over
-				setRedLED(0);
+			while (BUTTON_STATE_DOWN());					// Wait for button to be released if pressed
+															// Will watchdog timeout in 8 seconds if stuck, and then stuck button defense will take over
+			setRedLED(0);
 						
-				REBOOT();
-				
-			}
+			REBOOT();
+						
 		}
 
 								
@@ -1110,7 +1084,7 @@ int main(void)
 			
 		}
 		
-		if (currentSpeedStep==0) {		// Either we stepped though the settings back to off, or we got a spurious wake up
+		if (currentSpeedStep==0) {		// Either we stepped though the settings back to off, or we got a spurious wake up. Rebooting makes things fresh, and lets us goto sleep until next event happens.
 			REBOOT();	
 		}
 							
