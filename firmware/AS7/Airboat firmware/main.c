@@ -430,6 +430,12 @@ void setSpeedStepDefaults(void) {
 	}
 }
 
+// This is the currently running speed
+// This really should be a local variable, but must be global because it is used  
+// to update the current speed when a command is received asynchronously from the power port. 
+
+static uint8_t currentSpeedStep = 0;				// What motor speed setting are we currently on?
+
 
 // We use Timer0 for timing functions and also PWMing the LEDs
 
@@ -659,6 +665,8 @@ EMPTY_INTERRUPT( PCINT0_vect );
 	// TODO: Figure out how to just put an IRET in the vector table to save time and code space.
 
 
+	// Motor speed
+
 
 // Read a serial command from the CIP pin. Protocol described here...
 // https://github.com/bigjosh/Airboat-PCB/tree/master/Calibration-Controller
@@ -730,17 +738,22 @@ uint8_t readCommand() {
 		mask >>=1;
 		
 	}
-	
-	
-	// Commands:
-	// duty: 001 xxxx dddddddd p
-	// freq: 010 ssss tttttttt p
-	//
-	//  p = parity (all 16 bits add up to 0)
-	//  t = top
-	//  s = prescaler
-	//  x = don't care
 
+	// Command format (bits, MSB first)  ccc aaaa bbbbbbbb p
+	//
+	// c=command code
+	// a,b variables
+	// p=parity (all bits including parity add up to 0)
+
+	// Commands:
+	//
+	// 00: NA
+	// 01: Set red LED to brightness b
+	// 02: Set green LED to brightness b
+	// 03: Set motor normalized duty to b
+	// 04: Set motor prescaller to a and top to b
+	// 05: Reset motor speed steps to factory default values
+	
 	if (partiy == 0 )	{
 		
 		uint8_t c=   ( bits >> 13) & 0b00000111;
@@ -752,25 +765,33 @@ uint8_t readCommand() {
 					
 		switch ( c ) {
 		
-			case 1: {				
-				
-				if (b==255) blinkButton();
-				setRedLED(b);
+			case 1:						
+				setRedLED(b);			
+				break;
 			
-			}
-			break;
-			
-			case 2: {
-				
+			case 2: 
 				setGreenLED(b);
+				break;
 				
-			}
-			break;
-			
-			default: {
+			case 3: 
+				if (currentSpeedStep>0) {
+					speedSteps[currentSpeedStep].normailzedDuty=b;
+				}
+				break;
+				
+			case 4:
+				if (currentSpeedStep>0) {
+					speedSteps[currentSpeedStep].prescale=a;
+					speedSteps[currentSpeedStep].top=b;
+				}
+				break;
+				
+			case 5: 
+				setSpeedStepDefaults();
+				break;
+				
+			default: 
 				return(4);
-			}
-			
 		
 		}
 		
@@ -1000,9 +1021,7 @@ int main(void)
 			
 	// Ok, now we are running!!!
 		
-	// Motor speed
-	
-	uint8_t currentSpeedStep = 0;				// What motor speed setting are we currently on?
+	currentSpeedStep = 0;				// What motor speed setting are we currently on? start operation at OFF. 
 				
 	while (1)	{	
 				

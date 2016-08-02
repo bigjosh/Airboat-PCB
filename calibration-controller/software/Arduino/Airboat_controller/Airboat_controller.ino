@@ -105,7 +105,7 @@ int sendCommand( uint8_t command, uint8_t a, uint8_t b ) {
 
 void loop() {
 
-  sendCommand( 1 , 0 , 255 );
+  sendCommand( 3 , 0 ,  );
   delay(500);
     
 }
