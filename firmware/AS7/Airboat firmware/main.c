@@ -52,6 +52,12 @@
 
 #define US_PER_S	1000000					
 
+// This will enable connection to a calibration controller though the power jack.
+// This suppresses the charging feedback, and also stops the motor from turning off if charger is connected,
+// so this is for in-house testing only! Boards with this firmware are NOT FCC Part 15 exempt!
+
+#define CALIBRATION
+
 
 // ** Outputs
 
@@ -538,6 +544,9 @@ void setLEDsOff() {
 	setRedLED(0);
 }
 
+// Diagnostic routines below. These are handy for debugging, and they do not get linked 
+// if not used, so no need to remove or #ifdef them
+
 // Display a 16 bit value on the red/white LED pins. 
 // White=clock, Red=data
 // Each bit is 50us wide, MSB first.
@@ -571,6 +580,58 @@ void servicePort( uint16_t x ) {
 	
 }
 
+// Blink a byte out the LEDs for diagnostics
+// Starts with orange, then 8 bits High Bit first (white=1, red=0).
+// Each blink 500ms followed by 500ms off
+
+void blinkByte( uint8_t b ) {
+	
+	setOrangeLED(255);
+	_delay_ms(400);
+	
+	for(uint8_t x=255;x>0;x--) {
+		setOrangeLED(x);
+		_delay_ms(1);
+	}
+	
+	_delay_ms(400);
+	
+	uint8_t bitmask = 1<<7;
+	
+	while (bitmask) {
+		
+		wdt_reset();
+
+		
+		if (b & bitmask) {
+			setGreenLED(255);
+			} else {
+			setRedLED(255);
+		}
+
+		_delay_ms(100);
+		setGreenLED(0);
+		setRedLED(0);
+		_delay_ms(400);
+		
+		bitmask >>=1;
+		
+	}
+	
+}
+
+// Pulls button low for one cycle, just for diagnostics and triggering a scope...
+
+void blinkButton(void) {
+	BUTTON_PORT &= ~_BV( BUTTON_BIT );		// Turn pull up off
+	BUTTON_DDR |= _BV( BUTTON_BIT );		// Pull active low. Safe because the button only connects to ground
+	_delay_us(10);
+	BUTTON_DDR &= ~_BV(BUTTON_BIT);
+	BUTTON_PORT |= _BV( BUTTON_BIT );		// Turn pull up on
+	
+}
+
+
 // This function is copied right from the data sheet
 // Note we can not use the library function because it has a bug that cuases intermitant resets
 
@@ -597,106 +658,31 @@ EMPTY_INTERRUPT( PCINT0_vect );
 	// This will just return back to the main program. 
 	// TODO: Figure out how to just put an IRET in the vector table to save time and code space.
 
-	
-void motorTest() {
-	
-	// Set outputs to 1 (LEDs off)
-	WHITE_LED_PORT |= _BV(WHITE_LED_BIT);
-	RED_LED_PORT |= _BV(RED_LED_BIT);
-	
-	// Set pins to output mode
-	WHITE_LED_DDR |= _BV( WHITE_LED_BIT);
-	RED_LED_DDR |= _BV(RED_LED_BIT);
 
-		TCCR1 = 0b10000001;
+
+// Read a serial command from the CIP pin. Protocol described here...
+// https://github.com/bigjosh/Airboat-PCB/tree/master/Calibration-Controller
+
+
+// Read a 16 bit word from the power jack
+// Assumes CIP is already active.
+// Will wait for terminating bit to avoid charging false-alarm on return. 
+// Returns 0 on bad data or timeout. 
+// Only used if CALIBRATION is #defined
+
+// Returns:
+// 0=Success
+// 1=Active CIP not found
+// 2=CIP active too long (no sync valley found)
+// 3=Parity error
+// 4=Unknown command
+
+// The timing values are hard coded because they are tightly constrained by hardware limits. More info here...
+
+
+uint8_t readCommand() {
 		
-		//         1		 PWM1B			1 = Enable PWM B
-		//          11       COM1B			11 = Set the OC1B output line on compare match
-		GTCCR = 0b011100000;
-		
-		OCR1B = 100;
-		
-		OCR1C = 255;	// Counter top value - resets to zero when we get here
-		
-		// Silicon bug:
-		// http://electronics.stackexchange.com/questions/97596/attiny85-pwm-why-does-com1a0-need-to-be-set-before-pwm-b-will-work
-	//	TCCR1 |= (1 << COM1A0);	
-	
-}
-
-// Blink a byte out the LEDs for diagnostics 
-// Starts with orange, then 8 bits High Bit first (white=1, red=0).
-// Each blink 500ms followed by 500ms off
-
-
-void blinkByte( uint8_t b ) {
-	
-	setOrangeLED(255);
-	_delay_ms(400);
-	
-	for(uint8_t x=255;x>0;x--) {
-		setOrangeLED(x);
-		_delay_ms(1);
-	}
-	
-	_delay_ms(400);
-	
-	uint8_t bitmask = 1<<7;
-	
-	while (bitmask) {
-		
-		wdt_reset();
-
-		
-		if (b & bitmask) {
-			setGreenLED(255);					
-		} else {
-			setRedLED(255);
-		}
-
-		_delay_ms(100);
-		setGreenLED(0);
-		setRedLED(0);
-		_delay_ms(400);
-		
-		bitmask >>=1;
-		
-	}
-	
-}
-
-// Pulls button low for one cycle, just for diagnostics...
-
-void blinkButton(void) {		
-	BUTTON_PORT &= ~_BV( BUTTON_BIT );		// Turn pull up off
-	BUTTON_DDR |= _BV( BUTTON_BIT );		// Pull active low. Safe beucase the butotn only connects to ground
-	_delay_us(10);
-	BUTTON_DDR &= ~_BV(BUTTON_BIT);
-	BUTTON_PORT |= _BV( BUTTON_BIT );		// Turn pull up on
-	
-}
-
-#define CALIBRATION
-
-#ifdef CALIBRATION 
-
-	// Read a serial command from the CIP pin. Protocol described here...
-	// https://github.com/bigjosh/Airboat-PCB/tree/master/Calibration-Controller
-	// This should be called immediately after the rising edge on CIP...
-
-
-	// Read a 16 bit word from the power jack
-	// Assumes CIP is already active.
-	// Will wait for terminating bit to avoid charging false-alarm on return. 
-	// Returns 0 on bad data or timeout. 
-
-
-	// The timing values are hard coded because they are tightly constrained by hardware limits. More info here...
-
-
-	uint8_t readCommand() {
-		
-	uint16_t b=0;
+	uint16_t bits=0;
 	
 	uint16_t mask=1U<<15;
 	
@@ -704,7 +690,7 @@ void blinkButton(void) {
 				
 	while (mask) {
 
-		if (!CIP_STATE_ACTIVE()) return(0);		// We must start each bit with CIP active so we can sync to the falling edge
+		if (!CIP_STATE_ACTIVE()) return(1);		// We must start each bit with CIP active so we can sync to the falling edge
 																
 		uint8_t countdown = 255;				// This ends up being about the right timeout aprox 16ms at 128Khz. You would actually never want to wait that long because if the battery was full the CIP might not stay active that long. 
 												// Note this needs to be adjusted if F_CPU changes!!!
@@ -719,13 +705,13 @@ void blinkButton(void) {
 		// Now that we have the snap at the right moment, we can check to see if we even care and abort of not...
 		
 		if (countdown==0) {
-			return(0);										// We timed out waiting for the falling edge, no valid data here. We be charging!
+			return(2);										// We timed out waiting for the falling edge, no valid data here. We be charging!
 		}
 			
 				
 		if (cip_snapshot) {			// If we are high here, then it is a 1 bit
 						
-			b|=mask;
+			bits|=mask;
 			
 			partiy ^= 0x01;			// Keep track of bit parity for error checking
 			
@@ -750,43 +736,59 @@ void blinkButton(void) {
 	// duty: 001 xxxx dddddddd p
 	// freq: 010 ssss tttttttt p
 	//
-	//  p = partity (all bits add up to 0)
+	//  p = parity (all 16 bits add up to 0)
 	//  t = top
 	//  s = prescaler
 	//  x = don't care
 
 	if (partiy == 0 )	{
 		
-		uint8_t a =  ( b >> 9 ) & 0b00011111;
-		uint8_t b =  ( b >> 1 ) & 0b11111111;
-					
-		switch ( b & 0b1110000000000000 ) {
+		uint8_t c=   ( bits >> 13) & 0b00000111;
 		
-			case 0b0010000000000000: {
-			
+		uint8_t a =  ( bits >> 9 ) & 0b00011111;
+		uint8_t b =  ( bits >> 1 ) & 0b11111111;
+		
+//		blinkByte(b);
+					
+		switch ( c ) {
+		
+			case 1: {				
+				
+				if (b==255) blinkButton();
+				setRedLED(b);
 			
 			}
 			break;
+			
+			case 2: {
+				
+				setGreenLED(b);
+				
+			}
+			break;
+			
+			default: {
+				return(4);
+			}
+			
 		
 		}
 		
 	} else {	// Parity error
-		
+
+		return(3);		
 	}
 	
-	blinkButton();
 		
 	while( CIP_STATE_ACTIVE() );		// We have to consume the capacitor discharge after the data or else we might see it as a charger on the next pass
 										// It is up to the transmitter to timely turn off power at the end of a packet .
 										// This will eventually end in a watchdog timeout.
 	
-	return( 1 );			// Success!
+	return( 0 );			// Success!
 	
 	}
 
-#endif
 
-#define CALIBRATION 1
 	
 int main(void)
 {
