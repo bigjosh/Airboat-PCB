@@ -758,7 +758,7 @@ uint8_t readCommand() {
 		
 		uint8_t c=   ( bits >> 13) & 0b00000111;
 		
-		uint8_t a =  ( bits >> 9 ) & 0b00011111;
+		uint8_t a =  ( bits >> 9 ) & 0b00001111;
 		uint8_t b =  ( bits >> 1 ) & 0b11111111;
 		
 //		blinkByte(b);

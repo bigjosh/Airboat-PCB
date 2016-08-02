@@ -75,7 +75,6 @@ void setupJack(){
 
 // Return 0=success, 1=VIBE not connected or listening
  
-unint8_t send(uint16_t x) {
   
    JACK_LOW;    // Go low
    
