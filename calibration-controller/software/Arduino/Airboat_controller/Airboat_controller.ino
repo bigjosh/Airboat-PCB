@@ -10,7 +10,7 @@ Mark Bramwell, July 2010
 
 ********************************************************/
 
-#define JACK_PIN 1
+#define JACK_PIN 0
 
 // select the pins used on the LCD panel
 LiquidCrystal lcd(8, 9, 4, 5, 6, 7);
