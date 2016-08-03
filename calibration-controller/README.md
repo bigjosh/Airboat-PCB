@@ -73,7 +73,7 @@ Bytes are sent most significant bit first.
 
 ###Constraints
 
-If the power is on for more than about 1.5ms and the battery is fully charged, then the COP will turn off even though power is still applied. This can be avoided but only sending data when the unit is own since the drain of the motor will prevent the charger from detecting EOC.  
+If the power is on for more than about 1.5ms and the battery is fully charged, then the COP will turn off even though power is still applied. This can be avoided but only sending data when the unit is on since the drain of the motor will prevent the charger from detecting EOC.  
 
 Because there is a filtering capacitor across the power jack, it takes about 1ms for the power voltage to drop to 0V after we stop supping power. The COP stops when it hits ~4.5 volts, which happens pretty quickly. 
 
