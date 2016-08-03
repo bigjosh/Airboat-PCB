@@ -15,8 +15,6 @@ The Calibration Remote Controller connects to an AIRBOAT though the charging jac
 8. Press `select` to go into LED mode.
 9. Use the buttons to change the mixture of the red and green LEDs to make nice looking colors, then write down the combinations you like. 
  
-<img src="DSC08125.JPG">
-
 #Speed Parameters
 
 Each speed setting has two parameters – the `DUTY` and the `TOP`. 
