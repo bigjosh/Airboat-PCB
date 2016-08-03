@@ -23,26 +23,18 @@ LiquidCrystal lcd(8, 9, 4, 5, 6, 7);
 #define btnSELECT 4
 #define btnNONE   5
 
+#define KEY_DEBOUNCE_MS 30L      // How long we need to see the same Reading for before we accept it
+
+
 // read the buttons
 int read_LCD_buttons()
 {
-
- int adc_prev = 0;
   
- int adc_key_in  = analogRead(0);; 
+ int adc_key_in  =analogRead(0);        // Start from scratch
 
- // Debounce the input. It takes a sec to slew to the final value, dont want the intermediates. 
-
- do {
-  delay(2);
-  adc_prev = adc_key_in;
-  adc_key_in = analogRead(0);      // read the value from the sensor   
- } while (adc_prev != adc_key_in );
- 
- 
  // my buttons when read are centered at these valies: 0, 144, 329, 504, 741
  // we add approx 50 to those values and check to see if we are close
- if (adc_key_in > 1000) return btnNONE; // We make this the 1st option for speed reasons since it will be the most likely result
+  
  // For V1.1 us this threshold
  
  /*
@@ -60,19 +52,16 @@ int read_LCD_buttons()
  if (adc_key_in < 520)  return btnLEFT; 
  if (adc_key_in < 790)  return btnSELECT;   
 
-
-
  return btnNONE;  // when all others fail, return this...
 }
 
-// Call this from loop to check that the values are right.
+// Call this diagnostic from loop() to check that the values are right.
 
 void printKey() {
-       lcd.clear();
+      lcd.clear();
       lcd.print( analogRead(0) );
       delay(100);
       return;
-
 }
 
 char buff[10];
@@ -82,11 +71,14 @@ char buff[10];
 
 uint8_t mode=MODE_MOTOR;    
 
-#define MAX_DUTY 200
-uint8_t duty = 0;
+#define MAX_DUTY 255
+uint8_t duty = 50;
 
 #define MAX_TOP 255
-uint16_t top  = 255;
+uint8_t top  = 200;
+
+#define MAX_PRESCALE 7    // This is just so the computerd top will always fit into a uint16
+uint8_t prescale=1;
 
 uint8_t green = 0;
 
@@ -138,31 +130,45 @@ void digitstring( uint16_t x ) {
   
 }
 
+void refreshTop() {
+  
+     lcd.setCursor(9,1);  
+     digitstring( ((unsigned) top ) * ( 1<<(prescale-1) ) );  
+     lcd.print(buff); 
+
+}
+
+void refreshDuty() {
+
+     lcd.setCursor(2,1);
+     digitstring(duty);      
+     lcd.print(buff); 
+  
+}
+
+void refreshRed() {
+     lcd.setCursor(2,1);   
+     digitstring(red); 
+     lcd.print(buff);   
+}
+
+void refreshGreen() {
+     lcd.setCursor(9,1);  
+     digitstring(green);
+     lcd.print(buff);      
+}
+
 void refreshValues() {
 
  if (mode==MODE_MOTOR) {
-     lcd.setCursor(2,1); 
-  
-     digitstring(duty); 
-     lcd.print(buff); 
-  
-     lcd.setCursor(9,1); 
- 
-     digitstring(top);
-     lcd.print(buff); 
+    
+     refreshDuty();
+     refreshTop();
   
   } else if (mode==MODE_LED) {
-     lcd.setCursor(2,1);   
-
-     digitstring(red); 
-     lcd.print(buff); 
-  
-     lcd.setCursor(9,1); 
- 
-     digitstring(green);
-     lcd.print(buff); 
-
     
+     refreshRed();  
+     refreshGreen();
   }
 }
 
@@ -286,15 +292,15 @@ int sendCommand( uint8_t command, uint8_t a, uint8_t b ) {
   
 }
 
-
 void setup()
 {
   setupJack();
   lcd.begin(16, 2);              // start the library
   
-  lcd.clear();    // Clear the "not connected" message
- 
+  lcd.clear();    
+  lcd.noCursor();
   refresh();    
+  
 }
 
 
@@ -305,16 +311,48 @@ uint16_t keyDelay=INITIAL_DELAY;      // start with 1 second delay btween ticks
 unsigned long nextKeyTime=0;        // Next time key will repeat
 
 uint8_t lastkey=0;
-  
+
+long t=0;
+
+// Only send updates at most once per second to keep things responsive
+// since a send takes like 100ms
+
+#define CHANGE_GREEN    _BV(0)
+#define CHANGE_RED      _BV(1)
+#define CHANGE_DUTY     _BV(2)
+#define CHANGE_TOP      _BV(3)
+
+uint8_t changeFlags=0;
+
+#define SEND_TIMEOUT_MS 500
+
+unsigned long nextSend=0;
+
 void loop()
 {
 
- int lcd_key  = read_LCD_buttons();  // read the buttons
+ // The key input comes from an analog port, so the value can slew when moving between different buttons
+ // To avoid reading intermediate values while it slews, and also for general debouncing, we
+ // must see the same key reading stay constant for at least KEY_DEBOUNCE_MS before we accept it.  
  
- if (lcd_key== btnNONE ) {
-    return;
+ int lcd_key=-1;
+ unsigned long timeout = millis() + KEY_DEBOUNCE_MS;
+
+ while (  millis() < timeout ) {
+
+  int newKey =  read_LCD_buttons();  // read the buttons
+
+  if (newKey != lcd_key) {
+    lcd_key = newKey;
+    timeout = millis() + KEY_DEBOUNCE_MS;
+  }
+  
  }
-    
+
+ // Here we implement acceleration when a key is held down.
+ // This makes it possible to click though single increments with a quick press,
+ // but also scroll quickly by holding button down. 
+ 
  if (lcd_key == lastkey) {     // Key held down
  
    if (nextKeyTime > millis() ) {      // Still waiting
@@ -337,51 +375,79 @@ void loop()
  }
  
   nextKeyTime = millis() + keyDelay; 
+
+
+  if ( lcd_key == btnNONE) {
+    return;
+  }
  
- switch (lcd_key)               // depending on which button was pushed, we perform an action
+ 
+ switch (lcd_key)               // depending on which button was pushed, we perform an action. Better style would be to break this up by mode... 
  {
    case btnRIGHT:
 
         if (mode==MODE_MOTOR) {
-          
-          if (top<MAX_TOP) {
-            top++;
-            refreshValues();
-            
-            sendCommand( 04 , 0 , top );
 
+          if (top<MAX_TOP) {
+            
+             top++;
+
+          } else if (prescale<MAX_PRESCALE) {
+              
+              prescale++;           // Normalize the prescaler & top
+              top=top/2;              
+              top++;
+              
           }
           
+          refreshTop();
+          changeFlags |= CHANGE_TOP;
+                    
         } else if (mode==MODE_LED) {
 
           if (green<255) {
             green++;
-            refreshValues();
-            
-           sendCommand( 02 , 0 , green );
-
+            refreshGreen();       
+            changeFlags|=CHANGE_GREEN;
           }
         }
         break;
      
    case btnLEFT:
+   
         if (mode==MODE_MOTOR) {
-          
-          if (top>0) {
+
+          if (top==0) {
+            if (prescale>1) {
+              top=MAX_TOP;
+              prescale--;
+              lcd.setCursor(0,0);
+              lcd.print( top );
+              lcd.print(".");
+              lcd.print(prescale);
+              lcd.print(".");
+              
+            }
+          } else {
             top--;
-            refreshValues();
-            
-            sendCommand( 04 , 0 , top );
+            if (prescale>1 && top<=MAX_TOP/2) {   // Normalize?
+              top*=2;
+              prescale--;
+            }
           }
+             
+                    
+          refreshTop();          
+          changeFlags|=CHANGE_TOP;
           
         } else if (mode==MODE_LED) {
 
           if (green>0) {
             green--;
-            refreshValues();
-            
-            sendCommand( 02 , 0 , green );
           }
+            
+          refreshGreen();
+          changeFlags|=CHANGE_GREEN;
         }
         break;
      
@@ -390,19 +456,17 @@ void loop()
           
           if (duty<MAX_DUTY) {
             duty++;
-            refreshValues();
-            
-            sendCommand( 03 , 0 , duty );
           }
+          refreshDuty();
+          changeFlags|=CHANGE_DUTY;
           
         } else if (mode==MODE_LED) {
 
           if (red<255) {
             red++;
-            refreshValues();
-            
-            sendCommand( 01 , 0 , red );
           }
+          refreshRed();
+          changeFlags|=CHANGE_RED;
         }
         break;
      
@@ -411,19 +475,21 @@ void loop()
           
           if (duty>0) {
             duty--;
-            refreshValues();
-            
-            sendCommand( 03 , 0 , duty );
           }
+           
+          refreshDuty();
+          changeFlags|=CHANGE_DUTY;
+          
           
         } else if (mode==MODE_LED) {
 
           if (red>0) {
             red--;
-            refreshValues();
-            
-            sendCommand( 01 , 0 , red );
           }
+          
+          refreshRed();
+          changeFlags|=CHANGE_RED;
+          
         }
         break;
      
@@ -440,5 +506,18 @@ void loop()
    
  }
 
-        
+ if (changeFlags && (millis() >= nextSend) ) {
+
+  if (changeFlags & CHANGE_RED)     sendCommand( 01 , 0 , red );
+  if (changeFlags & CHANGE_GREEN)   sendCommand( 02 , 0 , green );
+  if (changeFlags & CHANGE_DUTY)    sendCommand( 03 , 0 , duty );  
+  if (changeFlags & CHANGE_TOP)     sendCommand( 04 , prescale , top );
+
+  changeFlags=0;
+
+  nextSend = millis() + SEND_TIMEOUT_MS;
+  
+ }
+
+      
 }

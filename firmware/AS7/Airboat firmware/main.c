@@ -229,7 +229,7 @@ static void setMotorPWM( uint8_t match , uint8_t top , uint8_t prescale ) {
 		//        1         CTC1            1="When the CTC1 control bit is set (one), Timer/Counter1 is reset to $00 in the CPU clock cycle after a compare match with OCR1C register value."
 		//            pppp	CS1[3:0]		prescaler
 		
-		TCCR1 = _BV(CTC1) | (prescale & (CS10|CS11|CS12|CS13) );
+		TCCR1 = _BV(CTC1) | (prescale & ( _BV(CS10)|_BV(CS11)|_BV(CS12)|_BV(CS13)) );
 		
 		//         1		 PWM1B			1 = Enable PWM B
 		//          11       COM1B			11 = Set the OC1B output line on compare match
@@ -695,20 +695,21 @@ uint8_t readCommand() {
 	uint16_t mask=1U<<15;
 	
 	uint8_t partiy = 0;
-				
+
 	while (mask) {
 
 		if (!CIP_STATE_ACTIVE()) return(1);		// We must start each bit with CIP active so we can sync to the falling edge
 																
-		uint8_t countdown = 255;				// This ends up being about the right timeout aprox 16ms at 128Khz. You would actually never want to wait that long because if the battery was full the CIP might not stay active that long. 
+		uint16_t countdown = 300;				// This ends up being about the right timeout aprox 16ms at 128Khz. You would actually never want to wait that long because if the battery was full the CIP might not stay active that long. 
 												// Note this needs to be adjusted if F_CPU changes!!!
 		
 		while (CIP_STATE_ACTIVE()  && (--countdown));  		// Now we wait for the falling edge to sync to
-															// We don't want to wait too long because the user is not seeing the CIP LED indication, and the motor is still running																														
+																// We don't want to wait too long because the user is not seeing the CIP LED indication, and the motor is still running																														
 															
 		_delay_us(3000);						// Put us in the middle of the data bit window. This gives time for the CIP to react to the change in input voltage, which empirically can take 1ms, plus a 1ms sample window. 				
 		
 		uint8_t cip_snapshot = CIP_STATE_ACTIVE();			// Grab a snapshot of the CIP level as close to sample target as possible. 
+		
 							
 		// Now that we have the snap at the right moment, we can check to see if we even care and abort of not...
 		
@@ -760,9 +761,7 @@ uint8_t readCommand() {
 		
 		uint8_t a =  ( bits >> 9 ) & 0b00001111;
 		uint8_t b =  ( bits >> 1 ) & 0b11111111;
-		
-//		blinkByte(b);
-					
+							
 		switch ( c ) {
 		
 			case 1:						
