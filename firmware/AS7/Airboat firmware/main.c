@@ -42,13 +42,21 @@
 // This is the default fuse setting and works fine for PWM frequencies up to about 10Khz (1% lowest duty), or 100KHz (10% lowest duty). 
 // This suits the current speed settings, but a high clock might be needed for higher PWM frequencies
 
-#define F_CPU 128000						// Name used by delay.h 
+#define F_CPU 128000						// Name used by delay.h		
+											// Note that there is a hardcoded delay look in readbyte() that needs to be adjusted if this changes!
+											// The ADC prescaler in readVccVoltage(0 also depends on the system clock.
 
-#define CYCLES_PER_S F_CPU					// Better name
+#define CYCLES_PER_S F_CPU					// Better name									
 
 #define CYCLES_PER_MS (F_CPU/1000UL)		// More convenient unit
 
 #define US_PER_S	1000000					
+
+// This will enable connection to a calibration controller though the power jack.
+// This suppresses the charging feedback, and also stops the motor from turning off if charger is connected,
+// so this is for in-house testing only! Boards with this firmware are NOT FCC Part 15 exempt!
+
+//#define CALIBRATION
 
 
 // ** Outputs
@@ -221,7 +229,7 @@ static void setMotorPWM( uint8_t match , uint8_t top , uint8_t prescale ) {
 		//        1         CTC1            1="When the CTC1 control bit is set (one), Timer/Counter1 is reset to $00 in the CPU clock cycle after a compare match with OCR1C register value."
 		//            pppp	CS1[3:0]		prescaler
 		
-		TCCR1 = _BV(CTC1) | (prescale & (CS10|CS11|CS12|CS13) );
+		TCCR1 = _BV(CTC1) | (prescale & ( _BV(CS10)|_BV(CS11)|_BV(CS12)|_BV(CS13)) );
 		
 		//         1		 PWM1B			1 = Enable PWM B
 		//          11       COM1B			11 = Set the OC1B output line on compare match
@@ -258,9 +266,9 @@ static uint8_t readVccVoltage(void) {
 	kHz and 200 kHz to get maximum resolution.
 	*/	
 				
-	// Enable ADC, set pre-scaller to /8 which will give a ADC clock of 1mHz/8 = 125kHz. 
+	// Enable ADC, no prescaler so we will run ADC at 125kHz. 
 	
-	ADCSRA = _BV(ADEN) | _BV(ADPS1) | _BV(ADPS0);
+	ADCSRA = _BV(ADEN);
 
 
 	// Select ADC inputs
@@ -383,14 +391,50 @@ typedef struct {
 
 #define SPEED_STEP_COUNT 4
 
-const speedStepStruct speedSteps[SPEED_STEP_COUNT] PROGMEM = {
+// We keep these in RAM so they can be modified.
+// The noinit makes it not get overwritten on every reboot (we set it up to defaults on first boot).
+// Really should go in eeprom, but too much complexity for now...
+
+static speedStepStruct speedSteps[SPEED_STEP_COUNT] __attribute__ ((section (".noinit")));
+
+void setSpeedStep( uint8_t step , uint8_t top , uint8_t prescale, uint8_t normalizedDuty ) {
+	speedSteps[step].top=top;
+	speedSteps[step].prescale=prescale;
+	speedSteps[step].normailzedDuty=normalizedDuty;
+}
+
+
+void updateMotorToStep( uint8_t step , uint8_t vccx10 ) {
+	
+		updateMotor( speedSteps[step].top , speedSteps[step].prescale , speedSteps[step].normailzedDuty, vccx10);		// Set new motor speed
+	
+}
+
+
+
+const speedStepStruct speedStepDefaults[SPEED_STEP_COUNT] PROGMEM = {
 	
 	{          0,    0 , 1 },			// step 0 = off
-	{		  30,  255 , 1 },
+	{		  10,  255 , 1 },
 	{	      50,  255 , 1 },
 	{	      80,  255 , 1 },
 	
 };
+
+
+
+void setSpeedStepDefaults(void) {
+	
+	for(uint8_t step=0; step<SPEED_STEP_COUNT;step++) {
+		setSpeedStep( step, pgm_read_word(&speedStepDefaults[step].top) , pgm_read_word(&speedStepDefaults[step].prescale), pgm_read_word(&speedStepDefaults[step].normailzedDuty) );
+	}
+}
+
+// This is the currently running speed
+// This really should be a local variable, but must be global because it is used  
+// to update the current speed when a command is received asynchronously from the power port. 
+
+static uint8_t currentSpeedStep = 0;				// What motor speed setting are we currently on?
 
 
 // We use Timer0 for timing functions and also PWMing the LEDs
@@ -453,7 +497,7 @@ static void disableLEDs() {
 
 #define LED_DIM_FACTOR 2		// Reduce LED brightness by this to compensate for missing current limiting resistor. 
 
-static void setWhiteLED( uint8_t b ) {
+static void setGreenLED( uint8_t b ) {
 	
 	if (b==0)	{	// Off
 		
@@ -493,11 +537,21 @@ static void setRedLED( uint8_t b ) {
 	
 }
 
+// Set brightness of both red and green LEDs at the same time. 0=off, 255=full on
+
+static void setOrangeLED( uint8_t b ) {
+	setGreenLED(b);
+	setRedLED(b/3);		// A bit of color correction since the red LED is brighter
+}
+
 
 void setLEDsOff() {
-	setWhiteLED(0);
+	setGreenLED(0);
 	setRedLED(0);
 }
+
+// Diagnostic routines below. These are handy for debugging, and they do not get linked 
+// if not used, so no need to remove or #ifdef them
 
 // Display a 16 bit value on the red/white LED pins. 
 // White=clock, Red=data
@@ -532,6 +586,58 @@ void servicePort( uint16_t x ) {
 	
 }
 
+// Blink a byte out the LEDs for diagnostics
+// Starts with orange, then 8 bits High Bit first (white=1, red=0).
+// Each blink 500ms followed by 500ms off
+
+void blinkByte( uint8_t b ) {
+	
+	setOrangeLED(255);
+	_delay_ms(400);
+	
+	for(uint8_t x=255;x>0;x--) {
+		setOrangeLED(x);
+		_delay_ms(1);
+	}
+	
+	_delay_ms(400);
+	
+	uint8_t bitmask = 1<<7;
+	
+	while (bitmask) {
+		
+		wdt_reset();
+
+		
+		if (b & bitmask) {
+			setGreenLED(255);
+			} else {
+			setRedLED(255);
+		}
+
+		_delay_ms(100);
+		setGreenLED(0);
+		setRedLED(0);
+		_delay_ms(400);
+		
+		bitmask >>=1;
+		
+	}
+	
+}
+
+// Pulls button low for one cycle, just for diagnostics and triggering a scope...
+
+void blinkButton(void) {
+	BUTTON_PORT &= ~_BV( BUTTON_BIT );		// Turn pull up off
+	BUTTON_DDR |= _BV( BUTTON_BIT );		// Pull active low. Safe because the button only connects to ground
+	_delay_us(10);
+	BUTTON_DDR &= ~_BV(BUTTON_BIT);
+	BUTTON_PORT |= _BV( BUTTON_BIT );		// Turn pull up on
+	
+}
+
+
 // This function is copied right from the data sheet
 // Note we can not use the library function because it has a bug that cuases intermitant resets
 
@@ -558,138 +664,151 @@ EMPTY_INTERRUPT( PCINT0_vect );
 	// This will just return back to the main program. 
 	// TODO: Figure out how to just put an IRET in the vector table to save time and code space.
 
-	
-void motorTest() {
-	
-	// Set outputs to 1 (LEDs off)
-	WHITE_LED_PORT |= _BV(WHITE_LED_BIT);
-	RED_LED_PORT |= _BV(RED_LED_BIT);
-	
-	// Set pins to output mode
-	WHITE_LED_DDR |= _BV( WHITE_LED_BIT);
-	RED_LED_DDR |= _BV(RED_LED_BIT);
 
-		TCCR1 = 0b10000001;
-		
-		//         1		 PWM1B			1 = Enable PWM B
-		//          11       COM1B			11 = Set the OC1B output line on compare match
-		GTCCR = 0b011100000;
-		
-		OCR1B = 100;
-		
-		OCR1C = 255;	// Counter top value - resets to zero when we get here
-		
-		// Silicon bug:
-		// http://electronics.stackexchange.com/questions/97596/attiny85-pwm-why-does-com1a0-need-to-be-set-before-pwm-b-will-work
-	//	TCCR1 |= (1 << COM1A0);	
-	
-}
+	// Motor speed
 
-// Blink a byte out the LEDs for diagnostics 
-// Starts with orange, then 8 bits High Bit first (white=1, red=0).
-// Each blink 500ms followed by 500ms off
-
-
-void blinkByte( uint8_t b ) {
-	
-	setRedLED(255);
-	setWhiteLED(255);
-	_delay_ms(500);
-	
-	uint8_t bitmask = 1<<7;
-	
-	while (bitmask) {
-		if (b & bitmask) {
-			setRedLED(0);
-			setWhiteLED(255);					
-		} else {
-			setRedLED(255);
-			setWhiteLED(0);			
-		}
-
-		_delay_ms(500);
-		bitmask >>=1;
-	}
-	
-}
-
-
-// Read a single byte from the CIP pin. 
-// This should be called immediately after the rising edge on CIP.
-// Returns 0 on bad data. 
-
-// The timing values are hard coded because they are tightly constrained by hardware limits. More info here...
-//
-
-#define BIT_TIMEOUT_US 20000
-
-uint8_t readByte() {
-	
-	uint8_t b=0;
-	uint8_t mask=1<<7;
-	
-	while (mask) {
-		
-		if (!CIP_STATE_ACTIVE()) {		// If we are on the first bit of a command, then we are already synced and CIP will already be active
-										// Otherwise we need to sync to it so we know exactly when to look for the data
-										
-			unsigned int countdown = 	( (F_CPU / US_PER_S ) * BIT_TIMEOUT_US  );	// Just get some basis in real time. We know that each loop pass *must* take at least 1 cycle so this establishes a bottom number of passes to have at least the TIMEOUT
-			
-			while (!CIP_STATE_ACTIVE()) {
-				countdown--;
-				if (countdown==0) {
-					return(0);							// We waited way too long for the next rising edge. 
-				}
-				
-			}
-						
-		}
-		
-		_delay_us(250);		// Put us in the middle of the high level sync part of the bit
-		
-		if (!CIP_STATE_ACTIVE()) return(0);		// If it is not high here, then we are not getting good data
-		
-		_delay_us(500);		// Put us in the middle of the data section
-		
-		if (CIP_STATE_ACTIVE()) {			// If we are high here, then it is a 1 bit
-			
-			b|=mask;
-						
-		} else {
-												
-		}
-		
-//		_delay_us(500);		// Put us in the middle of the trailing off phase
-	
-		_delay_us(250);	
-		setRedLED(0);
-		setWhiteLED(0);		
-		_delay_us(250);
-		
-		if (CIP_STATE_ACTIVE()) return(0);		// Here we should be in the middle of trailing off period. If not, not good data so abort.
-		
-		// Note that we do not do a wdt reset in here because no data transmission should ever take more than 8 seconds, and it is a nice safeguard to know we will reboot in case we ever get stuck. 
-		
-		mask >>=1;
-		
-	}	
-	
-	blinkByte(b);
-		
-	return( b );
-	
-}
 
 // Read a serial command from the CIP pin. Protocol described here...
 // https://github.com/bigjosh/Airboat-PCB/tree/master/Calibration-Controller
-// This should be called immediately after the rising edge on CIP...
+
+
+// Read a 16 bit word from the power jack
+// Assumes CIP is already active.
+// Will wait for terminating bit to avoid charging false-alarm on return. 
+// Returns 0 on bad data or timeout. 
+// Only used if CALIBRATION is #defined
+
+// Returns:
+// 0=Success
+// 1=Active CIP not found
+// 2=CIP active too long (no sync valley found)
+// 3=Parity error
+// 4=Unknown command
+
+// The timing values are hard coded because they are tightly constrained by hardware limits. More info here...
+
 
 uint8_t readCommand() {
+		
+	uint16_t bits=0;
 	
-	return(readByte());
+	uint16_t mask=1U<<15;
 	
+	uint8_t partiy = 0;
+
+	while (mask) {
+
+		if (!CIP_STATE_ACTIVE()) return(1);		// We must start each bit with CIP active so we can sync to the falling edge
+																
+		uint16_t countdown = 300;				// This ends up being about the right timeout aprox 16ms at 128Khz. You would actually never want to wait that long because if the battery was full the CIP might not stay active that long. 
+												// Note this needs to be adjusted if F_CPU changes!!!
+		
+		while (CIP_STATE_ACTIVE()  && (--countdown));  		// Now we wait for the falling edge to sync to
+																// We don't want to wait too long because the user is not seeing the CIP LED indication, and the motor is still running																														
+															
+		_delay_us(3000);						// Put us in the middle of the data bit window. This gives time for the CIP to react to the change in input voltage, which empirically can take 1ms, plus a 1ms sample window. 				
+		
+		uint8_t cip_snapshot = CIP_STATE_ACTIVE();			// Grab a snapshot of the CIP level as close to sample target as possible. 
+		
+							
+		// Now that we have the snap at the right moment, we can check to see if we even care and abort of not...
+		
+		if (countdown==0) {
+			return(2);										// We timed out waiting for the falling edge, no valid data here. We be charging!
+		}
+			
+				
+		if (cip_snapshot) {			// If we are high here, then it is a 1 bit
+						
+			bits|=mask;
+			
+			partiy ^= 0x01;			// Keep track of bit parity for error checking
+			
+			// We are already high, so We can immediately start looking for the next falling sync edge
+						
+		} else {
+
+			
+			// We are low, so we need to wait for the end of this bit so we can start the loop over back at CIP active
+			
+			_delay_us(3000);			// Put us 500us into the next sync active area. If it is not active here, then the next pass of the loop will abort.
+			
+		}
+		
+					
+		mask >>=1;
+		
+	}
+
+	// Command format (bits, MSB first)  ccc aaaa bbbbbbbb p
+	//
+	// c=command code
+	// a,b variables
+	// p=parity (all bits including parity add up to 0)
+
+	// Commands:
+	//
+	// 00: NA
+	// 01: Set red LED to brightness b
+	// 02: Set green LED to brightness b
+	// 03: Set motor normalized duty to b
+	// 04: Set motor prescaller to a and top to b
+	// 05: Reset motor speed steps to factory default values
 	
-}
+	if (partiy == 0 )	{
+		
+		uint8_t c=   ( bits >> 13) & 0b00000111;
+		
+		uint8_t a =  ( bits >> 9 ) & 0b00001111;
+		uint8_t b =  ( bits >> 1 ) & 0b11111111;
+							
+		switch ( c ) {
+		
+			case 1:						
+				setRedLED(b);			
+				break;
+			
+			case 2: 
+				setGreenLED(b);
+				break;
+				
+			case 3: 
+				if (currentSpeedStep>0) {
+					speedSteps[currentSpeedStep].normailzedDuty=b;
+				}
+				break;
+				
+			case 4:
+				if (currentSpeedStep>0) {
+					speedSteps[currentSpeedStep].prescale=a;
+					speedSteps[currentSpeedStep].top=b;
+				}
+				break;
+				
+			case 5: 
+				setSpeedStepDefaults();
+				break;
+				
+			default: 
+				return(4);
+		
+		}
+		
+	} else {	// Parity error
+
+		return(3);		
+	}
+	
+		
+	while( CIP_STATE_ACTIVE() );		// We have to consume the capacitor discharge after the data or else we might see it as a charger on the next pass
+										// It is up to the transmitter to timely turn off power at the end of a packet .
+										// This will eventually end in a watchdog timeout.
+	
+	return( 0 );			// Success!
+	
+	}
+
+
 	
 int main(void)
 {
@@ -726,7 +845,6 @@ int main(void)
 				
 		// Blink back and forth to show LEDs work and solicit a button press	
 		
-		//enableLEDs();			// Turn on PWM timer
 					
 		for(uint8_t i=0;i<100 && !BUTTON_STATE_DOWN(); i++ ) {
 			
@@ -737,19 +855,24 @@ int main(void)
 			}
 			
 			setRedLED(0);
-			setWhiteLED(255);
+			setGreenLED(255);
 			
 			for(uint8_t j=0; j<100 && !BUTTON_STATE_DOWN();j++ ) {
 				_delay_ms(1);
 			}
 			
-			setWhiteLED(0);
+			setGreenLED(0);
 					
 			wdt_reset();
 
 		}
 				
 		_delay_ms(BUTTON_DEBOUNCE_TIME_MS);
+		
+		
+		// Set up the initial values for the speedSteps
+		
+		setSpeedStepDefaults();
 		
 								
 		// TODO: Put more code here for some testing and feedback on initial battery connection at the factory.
@@ -793,7 +916,7 @@ int main(void)
 			}
 			
 			if (BUTTON_STATE_DOWN()) {												// Suppress breif flash when button released
-				setWhiteLED( PCT_TO_255(BUTTON_FEEDBACK_BRIGHTNESS_PCT) );
+				setOrangeLED( PCT_TO_255(BUTTON_FEEDBACK_BRIGHTNESS_PCT) );
 			}
 			
 			// Leave the white LED on for 100 ms or until the button goes up
@@ -804,7 +927,7 @@ int main(void)
 				_delay_ms(10);
 			}
 			
-			setWhiteLED(0);
+			setLEDsOff();
 					
 			wdt_reset();		
 			
@@ -827,9 +950,10 @@ int main(void)
 		uint8_t brightness=255;
 		
 		while(brightness--) {						
-			setWhiteLED(brightness);
+			setOrangeLED(brightness);
 			_delay_ms( 1000/255);			// Whole sequence will take about 1 sec
 		}
+		
 		
 		// We end with brightness=0 so LED is off.	
 		
@@ -838,6 +962,8 @@ int main(void)
 		// Do not enable interrupt on button pin change - we will require a charger state change to wake up
 		// Since the interrupt is not enabled, the pin will be disconnected during sleep so any floating
 		// on it will not waste power.
+	
+		setSpeedStepDefaults();		// Use lockout mode to reset the speed steps to defaults
 	
 	} else {
 	
@@ -858,15 +984,14 @@ int main(void)
 	// is that we get woken up an extra time and go back to sleep.	
 	
 	GIFR = _BV(PCIF);						// Clear interrupt flag so we will interrupt on any change after now...
+	
+	// Note that here we assume that CIP will always go active and wake us whenever the charger is connected, even if the battery is full.
+	// This is empirically found to be true. This is handy because there is no good way for us to interrupt on Vcc changes.	
 																		
 	if ( !CIP_STATE_ACTIVE() && !(readVccVoltage()>=CHARGER_VOLTAGE_THRESHOLD) ) {			// Check if conditions are ALREADY true since we only wake on change....
-
 			
 		// Ok, it is bedtime!
 		
-		//disableLEDs();					// Turn off timer since we don't need LEDs while sleeping and timer will use power
-											// TODO: I think shutodnw mode kills the timers. Check and make sure!
-												
 		set_sleep_mode( SLEEP_MODE_PWR_DOWN );  // Go into deep sleep where only a pin change can wake us.. uses only ~0.1uA!
 					
 		// GOOD NIGHT!		
@@ -895,114 +1020,102 @@ int main(void)
 			
 	// Ok, now we are running!!!
 		
-	// Motor speed
-	
-	uint8_t currentSpeedStep = 0;				// What motor speed setting are we currently on?
-			
-	while (1)	{		
-		
-		
+	currentSpeedStep = 0;				// What motor speed setting are we currently on? start operation at OFF. 
+				
+	while (1)	{	
+				
 		// This main loop runs for as long as the motor is on. 
 		// It can be terminated by battery charger change of state, low battery detection, button press back to 0 speed, or long button press
 		// All these changes terminate the loop in a reboot. 
+
+		uint8_t vccx10 = readVccVoltage();		// Snapshot of current voltage level
+				
+		#ifdef CALIBRATION
 		
-		// TODO: Detect difference between fully charged and charger unplugged by looking at Vcc voltage
+			// In calibration mode, we receive commands though the power jack so all charging functions are suppressed. 
+			readCommand();
+		
+		#else
+		
 				
-				
-		if (CIP_STATE_ACTIVE())		{		// Charging?
+			if ( vccx10 >= CHARGER_VOLTAGE_THRESHOLD ) {			// We are either getting data or a charger is connected
+												
+				motorOff();								// Always turn off motor when charger connected
+
+				_delay_ms( JACK_DEBOUNCE_TIME_MS );		// We might see bouncing as an energized plug is seated in the jack.
+														// This just prevents unnecessary blinking of the LED from us rebooting because we thought charging is over when it is Really just a bounce.
+														// Probably not need because the filed readCommand would have taken long enough...
+																															
 			
-			motorOff();						//Turn motor off in case were running before plug went in
-			
-			// Check for an incoming serial command on the charger port
-			
-			if (!readCommand()) {			// If it was not a valid command, then we are charging...
-													
 				uint8_t brightness=0;
 				int8_t direction=1;
+								
 			
-				_delay_ms( JACK_DEBOUNCE_TIME_MS );
-						
-				while (CIP_STATE_ACTIVE())	{	// White LED pulse for as long as we are charging....
+				while (  CIP_STATE_ACTIVE() || (readVccVoltage()>=CHARGER_VOLTAGE_THRESHOLD))	{	// Stay here as long as the plug is in. Order is important here because reading the voltage from the ADC takes a few ms
 				
-					setWhiteLED(brightness);
+					// This is slightly complex because we can transition back and forth from CIP to EOC asynchronously, when say either the battery becomes full
+					// or when the charger has been sitting connected for long enough that the battery self depletes low enough to trigger a top-off (unlikely)
 				
-					if (brightness==255) {
+					// We could just let this fall though after each of those transitions, but the tie it takes to reboot would make the LED blink a little and thats ugly.
+				
+				
+					// The effect of the slightly convoluted code below is is make the transitions between CIP and EOC smooth. The little things count - even if no one notices!
+					// When CIP is active, the LED will smoothly ramp up and down and up and down.
+					// When CIP is not active, the current ramp will continue in the current direction, but once it rises to max value it will stay there as long as !CIP
+				
+					setGreenLED(brightness);
+				
+					if (brightness==0) {
 					
-						direction=-1;
-					
-					} else if (brightness==0) {
-						
-						_delay_ms(100);				// Pause a second at off, also give the charge controller to sense the minimum current without the LED on
-				
 						direction=1;
+						//_delay_ms(100);			// Pause for a second at off because it looks nice and gives the charger IC a moment to see the current drain without any LED load.
+					
+						} else if (brightness==255) {
+					
+						if (!CIP_STATE_ACTIVE()) {		// If !CIP, then we are at EOC so smoothly get to full on and then stay there
+							direction=0;
+							} else {
+							direction=-1;
+						}
 					
 					}
 				
-					brightness+=direction;
+					brightness += direction;
 				
 					_delay_ms(1);		// Slows the speed of the ramping LED
-								
+				
 					wdt_reset();
 				
 				}
-							
-			}
 			
-			setWhiteLED(0);					// Turn it off now, for instant feedback if unplugged 
-			
-			REBOOT();						// Reboot for good measure
+				setGreenLED(0);					// Turn it off now, for instant feedback if unplugged
 
-			
-		}
-				
-		// Here we assume that CIP will always go active whenever the charger is connected, even if the battery is full.
-		// This is empirically found to be true. This is handy because there is no good way for us to interrupt on Vcc changes.
-							
-		uint8_t vccx10 = readVccVoltage();				// Capture the current power supply voltage. This takes ~1ms and will be needed multiple times below
+				REBOOT();						// Reboot for good measure. Note that this is the ONLY way out once we have detected CIP or high voltage (without valid data),
+														
+			}	
 		
-		if ( vccx10 >= CHARGER_VOLTAGE_THRESHOLD )		{		// End of charge? If we are seeing a Vcc higher than the battery can produce, then we are attached to a charger. IF CIP is not active, then the battery is at end-of-charge.
-			
-			motorOff();						// Turn motor off in case were running before plug went in
-			
-			setWhiteLED(255);				// White LED full on
-			
-			_delay_ms( JACK_DEBOUNCE_TIME_MS );
-			
-			while ( readVccVoltage() >= CHARGER_VOLTAGE_THRESHOLD ); 	// White LED on for as long as we are charging....
-			
-			// Note that this will watchdog timeout after 8 seconds and reboot us,
-			// After which we will immediately fall right back to here and continue to show the white LED
-			// This will cause a brief blink in the LED every 8 seconds, which I think is good.
-			
-			// Charger unplugged, reboot for good measure
-			
-			setWhiteLED(0);					// Turn it off now, for instant feedback if unplugged						
-				
-			// All done charing, reboot for good measure
-															
-			REBOOT();
-		}
-	
-											
-		if (vccx10 <= LOW_BATTERY_VOLTS_COLDx10) {
+		#endif
+										
+		// Check if battery is too low for operation. 
+		// Cold voltage is higher than warm because the motor being on pulls down the battery. This also give a bit of hysteresis when turning the unit back on after the motor drain made it turn off. 
+		
+													
+		if ( ( ( vccx10 <= LOW_BATTERY_VOLTS_COLDx10) && (currentSpeedStep==0)) ||  ( vccx10 <= LOW_BATTERY_VOLTS_WARMx10)  ) {
 									
-			if ( (currentSpeedStep==0) || ( vccx10 <= LOW_BATTERY_VOLTS_WARMx10) ) {	// Motor off, or running and really low?
-			
-				motorOff();
+			motorOff();
 											
-				setWhiteLED(0);									// Needed because both LEDs might be on if we are in the middle of a button press
+			setGreenLED(0);									// Needed because both LEDs might be on if we are in the middle of a button press
 			
-				setRedLED(255);
+			setRedLED(255);
 			
-				_delay_ms(LOW_BATTERY_LED_ONTIME_MS);			// Show red LED to user to show low battery
+			_delay_ms(LOW_BATTERY_LED_ONTIME_MS);			// Show red LED to user to show low battery
 				
-				while (BUTTON_STATE_DOWN());					// Wait for button to be released if pressed
-																// Will watchdog timeout in 8 seconds if stuck, and then stuck button defense will take over
-				setRedLED(0);
+			while (BUTTON_STATE_DOWN());					// Wait for button to be released if pressed
+															// Will watchdog timeout in 8 seconds if stuck, and then stuck button defense will take over
+			setRedLED(0);
 						
-				REBOOT();
-				
-			}
+			REBOOT();
+						
 		}
 
 								
@@ -1010,13 +1123,13 @@ int main(void)
 		
 		if (BUTTON_STATE_DOWN())	{		// Button pushed?
 			
-			setWhiteLED( PCT_TO_255( BUTTON_FEEDBACK_BRIGHTNESS_PCT ));		// A bit of instant user feedback
+			setOrangeLED( PCT_TO_255( BUTTON_FEEDBACK_BRIGHTNESS_PCT ));		// A bit of instant user feedback (orange)
 			
 			_delay_ms(BUTTON_DEBOUNCE_TIME_MS);			// debounce going down...
 			
 			if ( currentSpeedStep ==0 ) {				// Special case first press turning on instantly
 								
-				updateMotor( pgm_read_word(&speedSteps[1].top) , pgm_read_word(&speedSteps[1].prescale), pgm_read_word(&speedSteps[1].normailzedDuty), vccx10);		// Set new motor speed
+				updateMotorToStep( 1 , vccx10);		// Set new motor speed
 
 			}
 			
@@ -1031,7 +1144,7 @@ int main(void)
 					
 					motorOff();
 										
-					setWhiteLED(0);
+					setLEDsOff(0);
 					
 					REBOOT();
 					
@@ -1060,20 +1173,20 @@ int main(void)
 						
 		}
 			
-		updateMotor( pgm_read_word(&speedSteps[currentSpeedStep].top) , pgm_read_word(&speedSteps[1].prescale), pgm_read_word(&speedSteps[currentSpeedStep].normailzedDuty), vccx10);		// Set new motor speed
+		updateMotorToStep(currentSpeedStep , vccx10);		// Set new motor speed 
 				
 		if (buttonPressedFlag) {
 			
-			// Button released, white LED off again
+			// Button released, LEDs off again
 			
-			setWhiteLED(0);
-						
+			setLEDsOff();
+									
 			_delay_ms(BUTTON_DEBOUNCE_TIME_MS);		// debounce the button returning back up
 			
 			
 		}
 		
-		if (currentSpeedStep==0) {		// Either we stepped though the settings back to off, or we got a spurious wake up
+		if (currentSpeedStep==0) {		// Either we stepped though the settings back to off, or we got a spurious wake up. Rebooting makes things fresh, and lets us goto sleep until next event happens.
 			REBOOT();	
 		}
 							
