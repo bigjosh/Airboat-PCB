@@ -915,8 +915,8 @@ int main(void)
 				_delay_ms(10);
 			}
 			
-			if (BUTTON_STATE_DOWN()) {												// Suppress breif flash when button released
-				setOrangeLED( PCT_TO_255(BUTTON_FEEDBACK_BRIGHTNESS_PCT) );
+			if (BUTTON_STATE_DOWN()) {												// Suppress brief flash when button released
+				setGreenLED( PCT_TO_255(BUTTON_FEEDBACK_BRIGHTNESS_PCT) );
 			}
 			
 			// Leave the white LED on for 100 ms or until the button goes up
@@ -950,7 +950,7 @@ int main(void)
 		uint8_t brightness=255;
 		
 		while(brightness--) {						
-			setOrangeLED(brightness);
+			setGreenLED(brightness);
 			_delay_ms( 1000/255);			// Whole sequence will take about 1 sec
 		}
 		
@@ -1123,7 +1123,7 @@ int main(void)
 		
 		if (BUTTON_STATE_DOWN())	{		// Button pushed?
 			
-			setOrangeLED( PCT_TO_255( BUTTON_FEEDBACK_BRIGHTNESS_PCT ));		// A bit of instant user feedback (orange)
+			setGreenLED( PCT_TO_255( BUTTON_FEEDBACK_BRIGHTNESS_PCT ));		// A bit of instant user feedback 
 			
 			_delay_ms(BUTTON_DEBOUNCE_TIME_MS);			// debounce going down...
 			
