@@ -149,6 +149,7 @@
 #define PCT_TO_255(x) ((x*100)/255)			// Convert a human friendly percent to 0-255 scale
 
 #include <avr/io.h>
+#include <avr/fuse.h>
 #include <util/delay.h>
 #include <avr/power.h>
 #include <avr/sleep.h>
@@ -156,6 +157,14 @@
 #include <avr/eeprom.h>
 #include <avr/wdt.h>
 #include <avr/pgmspace.h>
+
+
+// These fuse settings will appear in the .ELF output file
+
+FUSES =
+{
+};
+
 
 
 static void initButton() {
