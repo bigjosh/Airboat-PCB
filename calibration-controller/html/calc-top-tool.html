@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<!-- saved from url=(0042)https://fiddle.jshell.net/f39n04oy/1/show/ -->
+<html><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+  
+  
+  <title>TOP calculator tool</title>
+
+
+<script type="text/javascript">//<![CDATA[
+
+function x() {
+  document.getElementById("topd").value = document.getElementById("topi").value;
+
+  t = document.getElementById("topd").value;
+  p = 1;
+
+  while (t >= 256) {
+
+    t = Math.floor(t / 2.0);
+    p = p * 2.0;
+
+  }
+
+  document.getElementById("topo").value = t;
+  document.getElementById("preo").value = p;
+  return false;
+}
+
+//]]> 
+
+</script>
+
+</head>
+
+<body>
+  <h3>
+Calculate computer readable <i>top</i> and <i>prescale</i> from human readable <i>top</i>
+</h3>
+
+<form action="https://fiddle.jshell.net/f39n04oy/1/show/post" onsubmit="x(); return false;" name="form">
+  Displayed TOP value?
+  <br>
+  <input type="number" name="topi" id="topi" min="1" max="">
+  <br>
+  <input type="submit" name="calculate">
+  <br>
+  <hr> Displayed TOP value:
+  <br>
+  <input type="number" name="topd" id="topd" disabled="">
+  <br> Calculated TOP:
+  <br>
+  <input type="number" name="topo" id="topo" disabled="">
+  <br> Calculated PRESCALE:
+  <br>
+  <input type="number" name="preo" id="preo" disabled="">
+
+</form>
+
+
+</body></html>

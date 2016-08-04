@@ -25,6 +25,12 @@ The `DUTY` controls what percentage of the time the motor is getting power. It r
 
 `TOP` is the number of counts per on/off cycle where a count is 1/128000th of a second. This selects the frequency at which the motor is turned on and off and ranges from about 2Hz to 64KHz. Note that the steps between available frequencies are larger for lower frequencies.
 
+To normalize the human readable `TOP` value on the controller screen to the computer readable `TOP` and `PRESCALE` values to type into the source code, you can use the included calculator tool here...
+
+http://htmlpreview.github.com//bigjosh/Airboat-PCB/tree/master/calibration-controller/html/calc-top-tool.html
+
+(or open the HTML file directly from you local hard drive)
+
 >NOTE: As you scan though the `TOP` values you will find some that are at frequencies that your ear can hear. We can someday use this to make the motor make beeps and sounds. 
 
 
