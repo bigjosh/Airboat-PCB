@@ -56,7 +56,7 @@
 // This suppresses the charging feedback, and also stops the motor from turning off if charger is connected,
 // so this is for in-house testing only! Boards with this firmware are NOT FCC Part 15 exempt!
 
-#define CALIBRATION
+//#define CALIBRATION
 
 
 // ** Outputs
