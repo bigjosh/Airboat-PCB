@@ -415,9 +415,9 @@ void updateMotorToStep( uint8_t step , uint8_t vccx10 ) {
 const speedStepStruct speedStepDefaults[SPEED_STEP_COUNT] PROGMEM = {
 	
 	{     0,    0 , 1 },			// step 0 = off
-	{    12,  250 , 16 },
-	{    30,  187 , 16 },
-	{    85,  125 , 16 },
+	{    12,  250 , 5 },
+	{    30,  187 , 5 },
+	{    85,  125 , 5 },
 	
 };
 

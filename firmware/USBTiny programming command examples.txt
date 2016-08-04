@@ -1,0 +1,28 @@
+This firmware can be programmed using a common USBTiny programmer.
+
+Prototypes
+==========
+
+To program the fuses on a virgin chip, use the command...
+
+avrdude -p t25 -c usbtiny -B 6 -U efuse:w:0xff:m - U hfuse:w:0xd7:m -U lfuse:w:0xc4:m 
+
+If you are unsure if the fuses have already been programmed, you can run the above command benignly - it will fail if the fuses wer already set. 
+
+To program the flash memory on a chip that has already had the fuses set, you can use the command...
+
+avrdude -p t25 -c usbtiny -B 40 -U flash:w:"airboat.firmware.hex":i
+
+
+Production
+==========
+You can program a virgin chip much more quickly by combining the FLASH and FUSE operations. By setting the fuses last, we get to download the 
+FLASH at full speed.
+
+Here is the command to program FLASH and FUSE on a virgin chip in a single operation...
+
+avrdude -p t25 -c usbtiny -B 6 -U flash:w:"airboat.firmware.hex":i -U efuse:w:0xff:m - U hfuse:w:0xd7:m -U lfuse:w:0xc4:m 
+
+It may be possible to speed that command up even more by changing the "-B 6" to "-B 4", but this will only work reliably if you have very good 
+connections so test before rolling out. 
+
