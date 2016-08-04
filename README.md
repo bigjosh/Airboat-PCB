@@ -26,6 +26,8 @@ You can put the device back into Transit Lockout Mode by holding the button down
 
 After the countdown expires, the  green LED will fade out to indicate that Transit Lockout Mode has been activated.
 
+Note that putting the device into transit lockout mode will reset the speed settings to their factory default values. Considering that there (currently) is no way to change these settings in a production unit, this is probably a null feature, but could be useful if somehow the settings ever get corrupted in a field unit.  
+
 Note: this mode also protects the unit from over discharging the battery in case the button gets stuck down because something is continuously pressing on it.
 
 ###Normal Operating Mode
@@ -63,16 +65,19 @@ On initial power-up, the devices enters a test mode...
   1. If the LEDs continue to alternate flash after you push the button, then you probably have a bad button or bad connection from the board to the button. 
   2. If the green LED stays lit at 50% brightness after you release the button, then you probably have a stuck button.
 
-Note that if the button is pressed upon initial power-up, then the normal test mode red/green blinking is skipped (because this is typically terminated by a button press).
+If the button is pressed during initial power-up, then the normal test mode red/green blinking is skipped (because this is typically terminated by a button press).
 
-Note that both above LED indications time out after about 30 seconds to avoid killing the battery. If the button stays down past the timeout, the the unit will eventually enter <a href="#transit-lockout-mode"Transit Lockout Mode</a>. 
+Both of the above LED indications time out after about 30 seconds to avoid killing the battery. If the button stays down past the timeout, the the unit will eventually enter <a href="#transit-lockout-mode"Transit Lockout Mode</a>.
 
-Note that test mode only happens on initial power up. The board is very low power so it can continue to operate off the residual charge in the capacitor for a long time (days-months) after the battery is disconnected. Because of this, you must follow this procedure to re-enter test mode once the device has been powered up (it is not enough just to remove the battery and replace it)... 
+If the LEDs seem to be flashing much faster than 10Hz (like pretty much just see orange) and the timeout seems to be much faster than 30 seconds (like 5 seconds), then it is likely that the fuses on the chip that control the clock speed have not been programmed correctly.  
+
+Test mode only happens on initial power up. The board is very low power so it can continue to operate off the residual charge in the capacitor for a long time (days-months) after the battery is disconnected. Because of this, you must follow this procedure to re-enter test mode once the device has been powered up (it is not enough just to remove the battery and replace it)... 
 
 1. disconnect all power (unplug the battery, unplug charger)
 2. push and hold the button for a second to exhaust all the residual power from the capacitors
 3. reconnect power and test mode should start again
  
+
 
 Features
 --------
