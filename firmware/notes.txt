@@ -1,0 +1,12 @@
+Programming Instructions for Dame Products AIRBOAT PCB
+======================================================
+
+This release is tailored  for an ATTINY25 part. 
+
+Both FLASH and FUSE memory must be programmed for correct operation. 
+
+FLASH memory MUST be programmed using the attached Airboard.firmware.hex file in Intel HEX format.
+
+FUSE memory MUST be programmed with the settings described in the FUSES.TXT file. 
+
+###

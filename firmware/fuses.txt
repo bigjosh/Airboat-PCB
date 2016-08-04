@@ -1,0 +1,14 @@
+SELFPRGEN = [ ]
+RSTDISBL = [ ]
+DWEN = [ ]
+SPIEN = [X]
+WDTON = [ ]
+EESAVE = [X]
+BODLEVEL = DISABLED
+CKDIV8 = [ ]
+CKOUT = [ ]
+SUT_CKSEL = WDOSC_128KHZ_6CK_14CK_0MS
+
+EXTENDED = 0xFF (valid)
+HIGH = 0xD7 (valid)
+LOW = 0xC4 (valid)
