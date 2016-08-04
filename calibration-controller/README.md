@@ -27,7 +27,7 @@ The `DUTY` controls what percentage of the time the motor is getting power. It r
 
 To normalize the human readable `TOP` value on the controller screen to the computer readable `TOP` and `PRESCALE` values to type into the source code, you can use the included calculator tool here...
 
-http://htmlpreview.github.com//bigjosh/Airboat-PCB/tree/master/calibration-controller/html/calc-top-tool.html
+http://htmlpreview.github.io/?https://github.com/bigjosh/Airboat-PCB/blob/master/calibration-controller/html/calc-top-tool.html
 
 (or open the HTML file directly from you local hard drive)
 
@@ -57,7 +57,7 @@ The controller communicates to the attached AIRBOAT by turning the power supplie
 
 ### Signals
 
-![](Signals.png)
+![](Signals.PNG)
 
 Commands are sent as 16 bit long packets.
 
