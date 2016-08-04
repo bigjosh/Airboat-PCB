@@ -163,6 +163,9 @@
 
 FUSES =
 {
+    (FUSE_CKSEL0 & FUSE_CKSEL1 & FUSE_CKSEL3 & FUSE_SUT0 & FUSE_SUT1),  // L:   128KHz internal RC oscillator, 0ms delay (wow, that was counter intuitive which bits are 0 or 1!)
+    FUSE_SPIEN ,					                                    // H:   Needed to allow reprogramming
+    EFUSE_DEFAULT                                                       // E:   Default 
 };
 
 
